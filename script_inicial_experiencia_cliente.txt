@@ -1,0 +1,1077 @@
+```sql
+/* ============================================================
+   MODELO COMÚN DE ENCUESTAS + ALTA INICIAL ENRUTA
+   BBDD destino: encuestas
+   Motor: PostgreSQL
+   ============================================================ */
+
+BEGIN;
+
+-- ============================================================
+-- 1. SCHEMAS
+-- ============================================================
+
+CREATE SCHEMA IF NOT EXISTS maestro;
+
+
+-- ============================================================
+-- 2. FUNCIÓN GENÉRICA updated_at
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS trigger AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- ============================================================
+-- 3. TABLAS MAESTRAS
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 3.1. Fases de experiencia
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.fases_experiencia (
+    id_fase_experiencia BIGSERIAL PRIMARY KEY,
+    codigo_fase VARCHAR(100) NOT NULL UNIQUE,
+    descripcion VARCHAR(255) NOT NULL,
+    activa BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS trg_fases_experiencia_updated_at ON maestro.fases_experiencia;
+
+CREATE TRIGGER trg_fases_experiencia_updated_at
+BEFORE UPDATE ON maestro.fases_experiencia
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.2. Tipos de interacción / canales
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.tipos_interaccion (
+    id_tipo_interaccion BIGSERIAL PRIMARY KEY,
+    codigo_tipo_interaccion VARCHAR(100) NOT NULL UNIQUE,
+    descripcion VARCHAR(255) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS trg_tipos_interaccion_updated_at ON maestro.tipos_interaccion;
+
+CREATE TRIGGER trg_tipos_interaccion_updated_at
+BEFORE UPDATE ON maestro.tipos_interaccion
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.3. Orígenes funcionales
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.origenes_encuesta (
+    id_origen BIGSERIAL PRIMARY KEY,
+    codigo_origen VARCHAR(100) NOT NULL UNIQUE,
+    descripcion VARCHAR(255) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS trg_origenes_encuesta_updated_at ON maestro.origenes_encuesta;
+
+CREATE TRIGGER trg_origenes_encuesta_updated_at
+BEFORE UPDATE ON maestro.origenes_encuesta
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.4. Empresas / distribuidores
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.empresas_distribuidoras (
+    id_empresa_distribuidora BIGSERIAL PRIMARY KEY,
+    codigo_empresa VARCHAR(100) NOT NULL UNIQUE,
+    nombre_empresa VARCHAR(255) NOT NULL,
+    activa BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS trg_empresas_distribuidoras_updated_at ON maestro.empresas_distribuidoras;
+
+CREATE TRIGGER trg_empresas_distribuidoras_updated_at
+BEFORE UPDATE ON maestro.empresas_distribuidoras
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.5. Métricas
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.lista_metricas (
+    id_metrica BIGSERIAL PRIMARY KEY,
+    codigo_metrica VARCHAR(100) NOT NULL UNIQUE,
+    descripcion VARCHAR(255),
+    valores_escala VARCHAR(50),
+    formula_calculo TEXT,
+    activa BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS trg_lista_metricas_updated_at ON maestro.lista_metricas;
+
+CREATE TRIGGER trg_lista_metricas_updated_at
+BEFORE UPDATE ON maestro.lista_metricas
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.6. Encuestas maestro
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.encuestas_maestro (
+    id_encuesta BIGSERIAL PRIMARY KEY,
+    codigo_encuesta VARCHAR(100) NOT NULL UNIQUE,
+    id_fase_experiencia BIGINT NOT NULL,
+    interaccion_activa BOOLEAN NOT NULL DEFAULT TRUE,
+    id_externo_encuesta VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_encuestas_fase
+        FOREIGN KEY (id_fase_experiencia)
+        REFERENCES maestro.fases_experiencia (id_fase_experiencia)
+);
+
+DROP TRIGGER IF EXISTS trg_encuestas_maestro_updated_at ON maestro.encuestas_maestro;
+
+CREATE TRIGGER trg_encuestas_maestro_updated_at
+BEFORE UPDATE ON maestro.encuestas_maestro
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.7. Configuración encuesta + métrica
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.encuestas_metricas_config (
+    id_encuesta BIGINT NOT NULL,
+    id_metrica BIGINT NOT NULL,
+    peso_global_marketing NUMERIC(10,4) NOT NULL DEFAULT 1.0000,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT pk_encuestas_metricas_config
+        PRIMARY KEY (id_encuesta, id_metrica),
+
+    CONSTRAINT fk_emc_encuesta
+        FOREIGN KEY (id_encuesta)
+        REFERENCES maestro.encuestas_maestro (id_encuesta),
+
+    CONSTRAINT fk_emc_metrica
+        FOREIGN KEY (id_metrica)
+        REFERENCES maestro.lista_metricas (id_metrica)
+);
+
+DROP TRIGGER IF EXISTS trg_encuestas_metricas_config_updated_at ON maestro.encuestas_metricas_config;
+
+CREATE TRIGGER trg_encuestas_metricas_config_updated_at
+BEFORE UPDATE ON maestro.encuestas_metricas_config
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.8. Preguntas maestro
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.preguntas_maestro (
+    id_pregunta BIGSERIAL PRIMARY KEY,
+    codigo_pregunta VARCHAR(100) NOT NULL UNIQUE,
+    id_encuesta BIGINT NOT NULL,
+    id_metrica BIGINT NOT NULL,
+    orden INTEGER NOT NULL,
+    texto_pregunta TEXT NOT NULL,
+    pregunta_activa BOOLEAN NOT NULL DEFAULT TRUE,
+    id_externo_pregunta VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_preguntas_encuesta
+        FOREIGN KEY (id_encuesta)
+        REFERENCES maestro.encuestas_maestro (id_encuesta),
+
+    CONSTRAINT fk_preguntas_metrica
+        FOREIGN KEY (id_metrica)
+        REFERENCES maestro.lista_metricas (id_metrica),
+
+    CONSTRAINT uq_pregunta_orden_por_encuesta
+        UNIQUE (id_encuesta, orden)
+);
+
+DROP TRIGGER IF EXISTS trg_preguntas_maestro_updated_at ON maestro.preguntas_maestro;
+
+CREATE TRIGGER trg_preguntas_maestro_updated_at
+BEFORE UPDATE ON maestro.preguntas_maestro
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.9. Opciones maestro
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.opciones_maestro (
+    id_opcion BIGSERIAL PRIMARY KEY,
+    codigo_opcion VARCHAR(150) NOT NULL UNIQUE,
+    id_pregunta BIGINT NOT NULL,
+    texto_opcion VARCHAR(255) NOT NULL,
+    valor_numerico NUMERIC(10,2) NOT NULL,
+    id_externo_opcion VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_opciones_pregunta
+        FOREIGN KEY (id_pregunta)
+        REFERENCES maestro.preguntas_maestro (id_pregunta),
+
+    CONSTRAINT uq_opcion_valor_por_pregunta
+        UNIQUE (id_pregunta, valor_numerico)
+);
+
+DROP TRIGGER IF EXISTS trg_opciones_maestro_updated_at ON maestro.opciones_maestro;
+
+CREATE TRIGGER trg_opciones_maestro_updated_at
+BEFORE UPDATE ON maestro.opciones_maestro
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 3.10. Versiones de encuestas
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.encuestas_versiones (
+    id_encuesta_version BIGSERIAL PRIMARY KEY,
+    id_encuesta BIGINT NOT NULL,
+    version_num INTEGER NOT NULL,
+    version_encuesta VARCHAR(50) NOT NULL,
+    version_activa BOOLEAN NOT NULL DEFAULT FALSE,
+    fecha_creacion TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_versiones_encuesta
+        FOREIGN KEY (id_encuesta)
+        REFERENCES maestro.encuestas_maestro (id_encuesta),
+
+    CONSTRAINT uq_encuesta_version_num
+        UNIQUE (id_encuesta, version_num)
+);
+
+DROP TRIGGER IF EXISTS trg_encuestas_versiones_updated_at ON maestro.encuestas_versiones;
+
+CREATE TRIGGER trg_encuestas_versiones_updated_at
+BEFORE UPDATE ON maestro.encuestas_versiones
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_encuestas_versiones_activa
+ON maestro.encuestas_versiones (id_encuesta)
+WHERE version_activa = TRUE;
+
+
+-- ------------------------------------------------------------
+-- 3.11. Ponderaciones versionadas
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS maestro.ponderaciones_versiones (
+    id_ponderacion_version BIGSERIAL PRIMARY KEY,
+    id_encuesta BIGINT NOT NULL,
+    version_num INTEGER NOT NULL,
+    id_pregunta BIGINT NOT NULL,
+    id_metrica BIGINT NOT NULL,
+    peso_global_marketing NUMERIC(10,4) NOT NULL,
+    peso_final_calculado NUMERIC(10,4) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_pv_encuesta
+        FOREIGN KEY (id_encuesta)
+        REFERENCES maestro.encuestas_maestro (id_encuesta),
+
+    CONSTRAINT fk_pv_pregunta
+        FOREIGN KEY (id_pregunta)
+        REFERENCES maestro.preguntas_maestro (id_pregunta),
+
+    CONSTRAINT fk_pv_metrica
+        FOREIGN KEY (id_metrica)
+        REFERENCES maestro.lista_metricas (id_metrica),
+
+    CONSTRAINT fk_pv_version
+        FOREIGN KEY (id_encuesta, version_num)
+        REFERENCES maestro.encuestas_versiones (id_encuesta, version_num),
+
+    CONSTRAINT uq_pv_encuesta_version_pregunta
+        UNIQUE (id_encuesta, version_num, id_pregunta)
+);
+
+DROP TRIGGER IF EXISTS trg_ponderaciones_versiones_updated_at ON maestro.ponderaciones_versiones;
+
+CREATE TRIGGER trg_ponderaciones_versiones_updated_at
+BEFORE UPDATE ON maestro.ponderaciones_versiones
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ============================================================
+-- 4. TABLAS OPERATIVAS
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 4.1. Ejecuciones / eventos de encuesta
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.ejecuciones_encuesta (
+    id_ejecucion BIGSERIAL PRIMARY KEY,
+    id_encuesta BIGINT NOT NULL,
+    id_tipo_interaccion BIGINT NOT NULL,
+    id_origen BIGINT NOT NULL,
+    id_empresa_distribuidora BIGINT NOT NULL,
+    id_externo_collector VARCHAR(255),
+    titulo_ejecucion VARCHAR(255) NOT NULL,
+    es_prueba BOOLEAN NOT NULL DEFAULT FALSE,
+    fecha_inicio_envio TIMESTAMP,
+    fecha_fin_envio TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_ejecuciones_encuesta
+        FOREIGN KEY (id_encuesta)
+        REFERENCES maestro.encuestas_maestro (id_encuesta),
+
+    CONSTRAINT fk_ejecuciones_tipo_interaccion
+        FOREIGN KEY (id_tipo_interaccion)
+        REFERENCES maestro.tipos_interaccion (id_tipo_interaccion),
+
+    CONSTRAINT fk_ejecuciones_origen
+        FOREIGN KEY (id_origen)
+        REFERENCES maestro.origenes_encuesta (id_origen),
+
+    CONSTRAINT fk_ejecuciones_empresa
+        FOREIGN KEY (id_empresa_distribuidora)
+        REFERENCES maestro.empresas_distribuidoras (id_empresa_distribuidora),
+
+    CONSTRAINT uq_ejecucion_contexto
+        UNIQUE (
+            id_encuesta,
+            id_tipo_interaccion,
+            id_origen,
+            id_empresa_distribuidora,
+            es_prueba
+        )
+);
+
+DROP TRIGGER IF EXISTS trg_ejecuciones_encuesta_updated_at ON public.ejecuciones_encuesta;
+
+CREATE TRIGGER trg_ejecuciones_encuesta_updated_at
+BEFORE UPDATE ON public.ejecuciones_encuesta
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 4.2. Envíos de encuestas
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.encuestas_envios (
+    id_envio BIGSERIAL PRIMARY KEY,
+    id_ejecucion BIGINT NOT NULL,
+    id_externo_envio VARCHAR(255),
+    codigo_isi VARCHAR(100),
+    destinatario VARCHAR(255),
+    fecha_envio TIMESTAMP,
+    atributos_adicionales JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_envios_ejecucion
+        FOREIGN KEY (id_ejecucion)
+        REFERENCES public.ejecuciones_encuesta (id_ejecucion)
+);
+
+DROP TRIGGER IF EXISTS trg_encuestas_envios_updated_at ON public.encuestas_envios;
+
+CREATE TRIGGER trg_encuestas_envios_updated_at
+BEFORE UPDATE ON public.encuestas_envios
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+
+-- ------------------------------------------------------------
+-- 4.3. Respuestas
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.respuestas (
+    id_respuesta BIGSERIAL PRIMARY KEY,
+    id_ejecucion BIGINT NOT NULL,
+    id_envio BIGINT,
+    id_encuesta BIGINT NOT NULL,
+    version_num INTEGER NOT NULL,
+    id_pregunta BIGINT NOT NULL,
+    id_grupo_respuesta UUID NOT NULL,
+    codigo_isi VARCHAR(100),
+    id_metrica BIGINT NOT NULL,
+    peso_final_calculado NUMERIC(10,4) NOT NULL,
+    valor_numerico NUMERIC(10,2),
+    valor_calculado NUMERIC(10,4),
+    respuesta_comentario TEXT,
+    atributos_adicionales JSONB,
+    fecha_respuesta TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_respuestas_ejecucion
+        FOREIGN KEY (id_ejecucion)
+        REFERENCES public.ejecuciones_encuesta (id_ejecucion),
+
+    CONSTRAINT fk_respuestas_envio
+        FOREIGN KEY (id_envio)
+        REFERENCES public.encuestas_envios (id_envio),
+
+    CONSTRAINT fk_respuestas_encuesta
+        FOREIGN KEY (id_encuesta)
+        REFERENCES maestro.encuestas_maestro (id_encuesta),
+
+    CONSTRAINT fk_respuestas_pregunta
+        FOREIGN KEY (id_pregunta)
+        REFERENCES maestro.preguntas_maestro (id_pregunta),
+
+    CONSTRAINT fk_respuestas_metrica
+        FOREIGN KEY (id_metrica)
+        REFERENCES maestro.lista_metricas (id_metrica),
+
+    CONSTRAINT fk_respuestas_version
+        FOREIGN KEY (id_encuesta, version_num)
+        REFERENCES maestro.encuestas_versiones (id_encuesta, version_num)
+);
+
+DROP TRIGGER IF EXISTS trg_respuestas_updated_at ON public.respuestas;
+
+CREATE TRIGGER trg_respuestas_updated_at
+BEFORE UPDATE ON public.respuestas
+FOR EACH ROW
+EXECUTE FUNCTION public.set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_respuestas_grupo_pregunta_version
+ON public.respuestas (
+    id_encuesta,
+    version_num,
+    id_pregunta,
+    id_grupo_respuesta
+);
+
+CREATE INDEX IF NOT EXISTS idx_respuestas_encuesta
+ON public.respuestas (id_encuesta);
+
+CREATE INDEX IF NOT EXISTS idx_respuestas_fecha
+ON public.respuestas (fecha_respuesta);
+
+CREATE INDEX IF NOT EXISTS idx_respuestas_codigo_isi
+ON public.respuestas (codigo_isi);
+
+CREATE INDEX IF NOT EXISTS idx_respuestas_atributos_gin
+ON public.respuestas USING GIN (atributos_adicionales);
+
+
+-- ============================================================
+-- 5. FUNCIONES DE NEGOCIO
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 5.1. UUID determinístico para ENRUTA por empresa + entrega
+-- ------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.uuid_enruta_entrega(
+    p_codigo_empresa TEXT,
+    p_id_entrega TEXT
+)
+RETURNS UUID AS $$
+DECLARE
+    v_hash TEXT;
+BEGIN
+    v_hash := md5('ENRUTA:' || COALESCE(p_codigo_empresa, '') || ':' || COALESCE(p_id_entrega, ''));
+
+    RETURN (
+        substr(v_hash, 1, 8) || '-' ||
+        substr(v_hash, 9, 4) || '-' ||
+        substr(v_hash, 13, 4) || '-' ||
+        substr(v_hash, 17, 4) || '-' ||
+        substr(v_hash, 21, 12)
+    )::UUID;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+
+-- ------------------------------------------------------------
+-- 5.2. Generar versión de ponderaciones
+-- ------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION maestro.generar_version_ponderaciones(
+    p_id_encuesta BIGINT
+)
+RETURNS TABLE (
+    id_encuesta BIGINT,
+    version_num INTEGER,
+    version_encuesta VARCHAR
+) AS $$
+DECLARE
+    v_next_version INTEGER;
+    v_version_label VARCHAR;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM maestro.encuestas_maestro e
+        WHERE e.id_encuesta = p_id_encuesta
+    ) THEN
+        RAISE EXCEPTION 'No existe la encuesta con id_encuesta=%', p_id_encuesta;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM maestro.preguntas_maestro p
+        WHERE p.id_encuesta = p_id_encuesta
+          AND p.pregunta_activa = TRUE
+    ) THEN
+        RAISE EXCEPTION 'La encuesta % no tiene preguntas activas', p_id_encuesta;
+    END IF;
+
+    SELECT COALESCE(MAX(ev.version_num), 0) + 1
+    INTO v_next_version
+    FROM maestro.encuestas_versiones ev
+    WHERE ev.id_encuesta = p_id_encuesta;
+
+    v_version_label := 'v' || v_next_version || '.0';
+
+    UPDATE maestro.encuestas_versiones ev
+    SET version_activa = FALSE
+    WHERE ev.id_encuesta = p_id_encuesta
+      AND ev.version_activa = TRUE;
+
+    INSERT INTO maestro.encuestas_versiones (
+        id_encuesta,
+        version_num,
+        version_encuesta,
+        version_activa,
+        fecha_creacion
+    )
+    VALUES (
+        p_id_encuesta,
+        v_next_version,
+        v_version_label,
+        TRUE,
+        NOW()
+    );
+
+    INSERT INTO maestro.ponderaciones_versiones (
+        id_encuesta,
+        version_num,
+        id_pregunta,
+        id_metrica,
+        peso_global_marketing,
+        peso_final_calculado
+    )
+    SELECT
+        p.id_encuesta,
+        v_next_version,
+        p.id_pregunta,
+        p.id_metrica,
+        emc.peso_global_marketing,
+        emc.peso_global_marketing AS peso_final_calculado
+    FROM maestro.preguntas_maestro p
+    JOIN maestro.encuestas_metricas_config emc
+      ON emc.id_encuesta = p.id_encuesta
+     AND emc.id_metrica = p.id_metrica
+    WHERE p.id_encuesta = p_id_encuesta
+      AND p.pregunta_activa = TRUE;
+
+    RETURN QUERY
+    SELECT
+        p_id_encuesta,
+        v_next_version,
+        v_version_label;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- ============================================================
+-- 6. DATOS MAESTROS BASE
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 6.1. Fase POSTVENTA
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.fases_experiencia (
+    codigo_fase,
+    descripcion,
+    activa
+)
+VALUES (
+    'POSTVENTA',
+    'Postventa',
+    TRUE
+)
+ON CONFLICT (codigo_fase) DO UPDATE
+SET
+    descripcion = EXCLUDED.descripcion,
+    activa = EXCLUDED.activa;
+
+
+-- ------------------------------------------------------------
+-- 6.2. Tipo de interacción / canal ENRUTA
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.tipos_interaccion (
+    codigo_tipo_interaccion,
+    descripcion,
+    activo
+)
+VALUES (
+    'ENRUTA',
+    'Valoración de entrega desde ENRUTA',
+    TRUE
+)
+ON CONFLICT (codigo_tipo_interaccion) DO UPDATE
+SET
+    descripcion = EXCLUDED.descripcion,
+    activo = EXCLUDED.activo;
+
+
+-- ------------------------------------------------------------
+-- 6.3. Origen REPARTOS
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.origenes_encuesta (
+    codigo_origen,
+    descripcion,
+    activo
+)
+VALUES (
+    'REPARTOS',
+    'Repartos',
+    TRUE
+)
+ON CONFLICT (codigo_origen) DO UPDATE
+SET
+    descripcion = EXCLUDED.descripcion,
+    activo = EXCLUDED.activo;
+
+
+-- ------------------------------------------------------------
+-- 6.4. Empresas / distribuidores
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.empresas_distribuidoras (
+    codigo_empresa,
+    nombre_empresa,
+    activa
+)
+VALUES
+    ('VEMARE', 'VEMARE', TRUE),
+    ('TRANSCOSE', 'TRANSCOSE', TRUE),
+    ('EDI', 'EDI', TRUE),
+    ('PAHER', 'PAHER', TRUE)
+ON CONFLICT (codigo_empresa) DO UPDATE
+SET
+    nombre_empresa = EXCLUDED.nombre_empresa,
+    activa = EXCLUDED.activa;
+
+
+-- ------------------------------------------------------------
+-- 6.5. Métricas base
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.lista_metricas (
+    codigo_metrica,
+    descripcion,
+    valores_escala,
+    formula_calculo,
+    activa
+)
+VALUES
+    (
+        'ENRUTA',
+        'Métrica específica para valoración de entrega ENRUTA',
+        '[-1;5]',
+        NULL,
+        TRUE
+    ),
+    (
+        'CSAT',
+        'Customer Satisfaction Score',
+        '[1;5]',
+        '% de respuestas 4 y 5 sobre el total de respuestas',
+        TRUE
+    ),
+    (
+        'CES',
+        'Customer Effort Score',
+        '[1;5]',
+        'Media de respuestas del 1 al 5',
+        TRUE
+    ),
+    (
+        'NPS',
+        'Net Promoter Score',
+        '[0;10]',
+        '% Promotores - % Detractores',
+        TRUE
+    )
+ON CONFLICT (codigo_metrica) DO UPDATE
+SET
+    descripcion = EXCLUDED.descripcion,
+    valores_escala = EXCLUDED.valores_escala,
+    formula_calculo = EXCLUDED.formula_calculo,
+    activa = EXCLUDED.activa;
+
+
+-- ============================================================
+-- 7. ALTA ENCUESTA ENRUTA
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 7.1. Encuesta ENC_ENRUTA
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.encuestas_maestro (
+    codigo_encuesta,
+    id_fase_experiencia,
+    interaccion_activa,
+    id_externo_encuesta
+)
+SELECT
+    'ENC_ENRUTA' AS codigo_encuesta,
+    fe.id_fase_experiencia,
+    TRUE AS interaccion_activa,
+    NULL AS id_externo_encuesta
+FROM maestro.fases_experiencia fe
+WHERE fe.codigo_fase = 'POSTVENTA'
+ON CONFLICT (codigo_encuesta) DO UPDATE
+SET
+    id_fase_experiencia = EXCLUDED.id_fase_experiencia,
+    interaccion_activa = EXCLUDED.interaccion_activa,
+    id_externo_encuesta = EXCLUDED.id_externo_encuesta;
+
+
+-- ------------------------------------------------------------
+-- 7.2. Configuración métrica ENRUTA
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.encuestas_metricas_config (
+    id_encuesta,
+    id_metrica,
+    peso_global_marketing
+)
+SELECT
+    e.id_encuesta,
+    m.id_metrica,
+    1.0000 AS peso_global_marketing
+FROM maestro.encuestas_maestro e
+JOIN maestro.lista_metricas m
+  ON m.codigo_metrica = 'ENRUTA'
+WHERE e.codigo_encuesta = 'ENC_ENRUTA'
+ON CONFLICT (id_encuesta, id_metrica) DO UPDATE
+SET peso_global_marketing = EXCLUDED.peso_global_marketing;
+
+
+-- ------------------------------------------------------------
+-- 7.3. Pregunta P_ENRUTA_001
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.preguntas_maestro (
+    codigo_pregunta,
+    id_encuesta,
+    id_metrica,
+    orden,
+    texto_pregunta,
+    pregunta_activa,
+    id_externo_pregunta
+)
+SELECT
+    'P_ENRUTA_001' AS codigo_pregunta,
+    e.id_encuesta,
+    m.id_metrica,
+    1 AS orden,
+    '¿Quieres valorar la entrega? Nos importa tu opinión' AS texto_pregunta,
+    TRUE AS pregunta_activa,
+    'RATING_ENTREGA' AS id_externo_pregunta
+FROM maestro.encuestas_maestro e
+JOIN maestro.lista_metricas m
+  ON m.codigo_metrica = 'ENRUTA'
+WHERE e.codigo_encuesta = 'ENC_ENRUTA'
+ON CONFLICT (codigo_pregunta) DO UPDATE
+SET
+    id_encuesta = EXCLUDED.id_encuesta,
+    id_metrica = EXCLUDED.id_metrica,
+    orden = EXCLUDED.orden,
+    texto_pregunta = EXCLUDED.texto_pregunta,
+    pregunta_activa = EXCLUDED.pregunta_activa,
+    id_externo_pregunta = EXCLUDED.id_externo_pregunta;
+
+
+-- ------------------------------------------------------------
+-- 7.4. Opciones ENRUTA
+-- ------------------------------------------------------------
+
+INSERT INTO maestro.opciones_maestro (
+    codigo_opcion,
+    id_pregunta,
+    texto_opcion,
+    valor_numerico,
+    id_externo_opcion
+)
+SELECT
+    opcion.codigo_opcion,
+    p.id_pregunta,
+    opcion.texto_opcion,
+    opcion.valor_numerico,
+    opcion.id_externo_opcion
+FROM maestro.preguntas_maestro p
+JOIN (
+    VALUES
+        ('OP_ENRUTA_001_MENOS_1', 'Declina firma / Ahora no', -1, 'RATING_ENTREGA_-1'),
+        ('OP_ENRUTA_001_1', 'Muy mala', 1, 'RATING_ENTREGA_1'),
+        ('OP_ENRUTA_001_2', 'Mala', 2, 'RATING_ENTREGA_2'),
+        ('OP_ENRUTA_001_3', 'Normal', 3, 'RATING_ENTREGA_3'),
+        ('OP_ENRUTA_001_4', 'Buena', 4, 'RATING_ENTREGA_4'),
+        ('OP_ENRUTA_001_5', 'Muy buena', 5, 'RATING_ENTREGA_5')
+) AS opcion (
+    codigo_opcion,
+    texto_opcion,
+    valor_numerico,
+    id_externo_opcion
+)
+  ON TRUE
+WHERE p.codigo_pregunta = 'P_ENRUTA_001'
+ON CONFLICT (codigo_opcion) DO UPDATE
+SET
+    id_pregunta = EXCLUDED.id_pregunta,
+    texto_opcion = EXCLUDED.texto_opcion,
+    valor_numerico = EXCLUDED.valor_numerico,
+    id_externo_opcion = EXCLUDED.id_externo_opcion;
+
+
+-- ------------------------------------------------------------
+-- 7.5. Generación de versión inicial ENRUTA
+--      Solo genera versión si no existe ninguna para ENC_ENRUTA.
+-- ------------------------------------------------------------
+
+DO $$
+DECLARE
+    v_id_encuesta BIGINT;
+    v_total_versiones INTEGER;
+BEGIN
+    SELECT e.id_encuesta
+    INTO v_id_encuesta
+    FROM maestro.encuestas_maestro e
+    WHERE e.codigo_encuesta = 'ENC_ENRUTA';
+
+    SELECT COUNT(*)
+    INTO v_total_versiones
+    FROM maestro.encuestas_versiones ev
+    WHERE ev.id_encuesta = v_id_encuesta;
+
+    IF v_total_versiones = 0 THEN
+        PERFORM *
+        FROM maestro.generar_version_ponderaciones(v_id_encuesta);
+    END IF;
+END;
+$$;
+
+
+-- ------------------------------------------------------------
+-- 7.6. Ejecuciones ENRUTA por empresa/distribuidor
+-- ------------------------------------------------------------
+
+INSERT INTO public.ejecuciones_encuesta (
+    id_encuesta,
+    id_tipo_interaccion,
+    id_origen,
+    id_empresa_distribuidora,
+    id_externo_collector,
+    titulo_ejecucion,
+    es_prueba,
+    fecha_inicio_envio
+)
+SELECT
+    e.id_encuesta,
+    ti.id_tipo_interaccion,
+    o.id_origen,
+    emp.id_empresa_distribuidora,
+    NULL AS id_externo_collector,
+    'Valoraciones ENRUTA - ' || emp.codigo_empresa AS titulo_ejecucion,
+    FALSE AS es_prueba,
+    NOW() AS fecha_inicio_envio
+FROM maestro.encuestas_maestro e
+JOIN maestro.tipos_interaccion ti
+  ON ti.codigo_tipo_interaccion = 'ENRUTA'
+JOIN maestro.origenes_encuesta o
+  ON o.codigo_origen = 'REPARTOS'
+JOIN maestro.empresas_distribuidoras emp
+  ON emp.codigo_empresa IN ('VEMARE', 'TRANSCOSE', 'EDI', 'PAHER')
+WHERE e.codigo_encuesta = 'ENC_ENRUTA'
+ON CONFLICT (
+    id_encuesta,
+    id_tipo_interaccion,
+    id_origen,
+    id_empresa_distribuidora,
+    es_prueba
+)
+DO UPDATE
+SET
+    titulo_ejecucion = EXCLUDED.titulo_ejecucion,
+    fecha_inicio_envio = COALESCE(public.ejecuciones_encuesta.fecha_inicio_envio, EXCLUDED.fecha_inicio_envio);
+
+
+COMMIT;
+
+
+-- ============================================================
+-- 8. VALIDACIONES POSTERIORES
+-- Ejecutar después del COMMIT
+-- ============================================================
+
+-- Validar fases
+SELECT *
+FROM maestro.fases_experiencia
+ORDER BY id_fase_experiencia;
+
+-- Validar tipos de interacción
+SELECT *
+FROM maestro.tipos_interaccion
+ORDER BY id_tipo_interaccion;
+
+-- Validar orígenes
+SELECT *
+FROM maestro.origenes_encuesta
+ORDER BY id_origen;
+
+-- Validar empresas/distribuidores
+SELECT *
+FROM maestro.empresas_distribuidoras
+ORDER BY id_empresa_distribuidora;
+
+-- Validar métricas
+SELECT *
+FROM maestro.lista_metricas
+ORDER BY id_metrica;
+
+-- Validar encuesta ENRUTA
+SELECT
+    e.id_encuesta,
+    e.codigo_encuesta,
+    fe.codigo_fase,
+    e.interaccion_activa,
+    e.id_externo_encuesta
+FROM maestro.encuestas_maestro e
+JOIN maestro.fases_experiencia fe
+  ON fe.id_fase_experiencia = e.id_fase_experiencia
+WHERE e.codigo_encuesta = 'ENC_ENRUTA';
+
+-- Validar pregunta ENRUTA
+SELECT
+    p.id_pregunta,
+    p.codigo_pregunta,
+    e.codigo_encuesta,
+    m.codigo_metrica,
+    p.orden,
+    p.texto_pregunta,
+    p.id_externo_pregunta
+FROM maestro.preguntas_maestro p
+JOIN maestro.encuestas_maestro e
+  ON e.id_encuesta = p.id_encuesta
+JOIN maestro.lista_metricas m
+  ON m.id_metrica = p.id_metrica
+WHERE e.codigo_encuesta = 'ENC_ENRUTA'
+ORDER BY p.orden;
+
+-- Validar opciones ENRUTA
+SELECT
+    o.codigo_opcion,
+    o.valor_numerico,
+    o.texto_opcion,
+    o.id_externo_opcion
+FROM maestro.opciones_maestro o
+JOIN maestro.preguntas_maestro p
+  ON p.id_pregunta = o.id_pregunta
+WHERE p.codigo_pregunta = 'P_ENRUTA_001'
+ORDER BY o.valor_numerico;
+
+-- Validar versión activa
+SELECT
+    ev.*
+FROM maestro.encuestas_versiones ev
+JOIN maestro.encuestas_maestro e
+  ON e.id_encuesta = ev.id_encuesta
+WHERE e.codigo_encuesta = 'ENC_ENRUTA'
+ORDER BY ev.version_num;
+
+-- Validar ponderaciones
+SELECT
+    e.codigo_encuesta,
+    ev.version_num,
+    ev.version_encuesta,
+    p.codigo_pregunta,
+    m.codigo_metrica,
+    pv.peso_global_marketing,
+    pv.peso_final_calculado
+FROM maestro.ponderaciones_versiones pv
+JOIN maestro.encuestas_maestro e
+  ON e.id_encuesta = pv.id_encuesta
+JOIN maestro.encuestas_versiones ev
+  ON ev.id_encuesta = pv.id_encuesta
+ AND ev.version_num = pv.version_num
+JOIN maestro.preguntas_maestro p
+  ON p.id_pregunta = pv.id_pregunta
+JOIN maestro.lista_metricas m
+  ON m.id_metrica = pv.id_metrica
+WHERE e.codigo_encuesta = 'ENC_ENRUTA'
+ORDER BY ev.version_num, p.orden;
+
+-- Validar ejecuciones ENRUTA por empresa/distribuidor
+SELECT
+    ee.id_ejecucion,
+    e.codigo_encuesta,
+    ti.codigo_tipo_interaccion,
+    o.codigo_origen,
+    emp.codigo_empresa,
+    ee.titulo_ejecucion,
+    ee.es_prueba,
+    ee.fecha_inicio_envio
+FROM public.ejecuciones_encuesta ee
+JOIN maestro.encuestas_maestro e
+  ON e.id_encuesta = ee.id_encuesta
+JOIN maestro.tipos_interaccion ti
+  ON ti.id_tipo_interaccion = ee.id_tipo_interaccion
+JOIN maestro.origenes_encuesta o
+  ON o.id_origen = ee.id_origen
+JOIN maestro.empresas_distribuidoras emp
+  ON emp.id_empresa_distribuidora = ee.id_empresa_distribuidora
+WHERE e.codigo_encuesta = 'ENC_ENRUTA'
+ORDER BY emp.codigo_empresa;
+```
