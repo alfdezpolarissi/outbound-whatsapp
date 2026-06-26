@@ -1,0 +1,266 @@
+{
+  "name": "WF-04-REPORTE",
+  "nodes": [
+    {
+      "id": "d4e5f6a7-0001-0001-0001-000000000001",
+      "name": "Schedule: 8:00 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }]
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0002-0002-0002-000000000002",
+      "name": "HTTP: monday items ENVIADA/ENVIANDO",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `query { boards(ids: [BOARD_ID]) { items_page(limit: 100, query_params: { rules: [{ column_id: \"status_wa\", compare_value: [\"ENVIADA\",\"ENVIANDO\"], operator: any_of }] }) { items { id name column_values { id text } } } } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0003-0003-0003-000000000003",
+      "name": "Code: Extraer items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "parameters": {
+        "jsCode": "const items = $json.data?.boards?.[0]?.items_page?.items || [];\nreturn items.map(item => {\n  const cols = {};\n  item.column_values.forEach(c => { cols[c.id] = c.text; });\n  return {\n    json: {\n      monday_item_id: item.id,\n      titulo: item.name,\n      tipo: (cols.tipo_comunicacion || '').toLowerCase(),\n      fecha_envio: cols.date_envio\n    }\n  };\n});"
+      }
+    },
+    {
+      "id": "d4e5f6a7-0004-0004-0004-000000000004",
+      "name": "Loop: Por item",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [720, 300],
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      }
+    },
+    {
+      "id": "d4e5f6a7-0005-0005-0005-000000000005",
+      "name": "PG: Obtener id_campana",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [960, 220],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, es_prueba, fecha_inicio_envio FROM encuestas.campanas_wa WHERE id_externo_collector = $1",
+        "additionalFields": {
+          "queryParams": "={{ [$json.monday_item_id].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0006-0006-0006-000000000006",
+      "name": "IF: ¿campana encontrada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1200, 220],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.id }}",
+              "operator": { "type": "exists" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0007-0007-0007-000000000007",
+      "name": "PG: Contadores campana",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1440, 140],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  COUNT(*) FILTER (WHERE estado_envio   = 'ENVIADO')    AS total_enviados,\n  COUNT(*) FILTER (WHERE estado_entrega = 'ENTREGADO')  AS total_delivered,\n  COUNT(*) FILTER (WHERE estado_entrega = 'LEIDO')      AS total_read,\n  COUNT(*) FILTER (WHERE estado_entrega = 'respondido') AS total_respondidos\nFROM encuestas.envios_wa\nWHERE id_campana = $1",
+        "additionalFields": {
+          "queryParams": "={{ [$json.id].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0008-0008-0008-000000000008",
+      "name": "Code: Prep mutation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 140],
+      "parameters": {
+        "jsCode": "const campana    = $('PG: Obtener id_campana').item.json;\nconst contadores = $input.first().json;\nconst item       = $('Loop: Por item').item.json;\n\nconst total_enviados    = parseInt(contadores.total_enviados   || 0);\nconst total_delivered   = parseInt(contadores.total_delivered  || 0);\nconst total_respondidos = parseInt(contadores.total_respondidos|| 0);\n\n// ¿Hay que cerrar la campaña?\nconst es_notificacion = item.tipo === 'notificacion';\nconst fecha_envio_obj = campana.fecha_inicio_envio ? new Date(campana.fecha_inicio_envio) : null;\nconst horas_desde_envio = fecha_envio_obj ? (Date.now() - fecha_envio_obj.getTime()) / 3600000 : 0;\n\nconst completada = (total_respondidos > 0 && total_respondidos >= total_enviados)\n  || (es_notificacion && horas_desde_envio >= 48);\n\nreturn [{\n  json: {\n    monday_item_id: item.monday_item_id,\n    total_enviados,\n    total_delivered,\n    total_respondidos,\n    completada\n  }\n}];"
+      }
+    },
+    {
+      "id": "d4e5f6a7-0009-0009-0009-000000000009",
+      "name": "HTTP: monday UPDATE contadores",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 140],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$json.monday_item_id}\", column_values: \"{\\\\\\\"num_enviados\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_enviados}}, \\\\\\\"num_delivered\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_delivered}}, \\\\\\\"num_respondidos\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_respondidos}}}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0010-0010-0010-000000000010",
+      "name": "IF: ¿completada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2160, 140],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $('Code: Prep mutation').item.json.completada }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0011-0011-0011-000000000011",
+      "name": "HTTP: monday COMPLETADA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2400, 60],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Prep mutation').item.json.monday_item_id}\", column_id: \"status_wa\", value: \"{\\\\\\\"label\\\\\\\": \\\\\\\"COMPLETADA\\\\\\\"}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0012-0012-0012-000000000012",
+      "name": "NoOp: campana no en BD",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1440, 320],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Schedule: 8:00 AM": {
+      "main": [[{ "node": "HTTP: monday items ENVIADA/ENVIANDO", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday items ENVIADA/ENVIANDO": {
+      "main": [[{ "node": "Code: Extraer items", "type": "main", "index": 0 }]]
+    },
+    "Code: Extraer items": {
+      "main": [[{ "node": "Loop: Por item", "type": "main", "index": 0 }]]
+    },
+    "Loop: Por item": {
+      "main": [
+        [{ "node": "PG: Obtener id_campana", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "PG: Obtener id_campana": {
+      "main": [[{ "node": "IF: ¿campana encontrada?", "type": "main", "index": 0 }]]
+    },
+    "IF: ¿campana encontrada?": {
+      "main": [
+        [{ "node": "PG: Contadores campana", "type": "main", "index": 0 }],
+        [{ "node": "NoOp: campana no en BD", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Contadores campana": {
+      "main": [[{ "node": "Code: Prep mutation", "type": "main", "index": 0 }]]
+    },
+    "Code: Prep mutation": {
+      "main": [[{ "node": "HTTP: monday UPDATE contadores", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday UPDATE contadores": {
+      "main": [[{ "node": "IF: ¿completada?", "type": "main", "index": 0 }]]
+    },
+    "IF: ¿completada?": {
+      "main": [
+        [{ "node": "HTTP: monday COMPLETADA", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "HTTP: monday COMPLETADA": {
+      "main": [[{ "node": "Loop: Por item", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": [{ "name": "WA-REPORTE" }]
+}

@@ -1,0 +1,814 @@
+{
+  "name": "00 Mailjet - Importación BBDD a Postgres (v12)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 🗺️ Arquitectura general\n\n**Fase 1** — Delta sync de contactos:\nDetecta cambios por actividad email (`LastActivityAt`) + contactos nuevos.\nSync completa automática: domingos · `force_full=true` · contactos nuevos.\n\n**Fase 2** — Listas Mailjet:\n- Delta ≤ 500 contactos → `/contact/{id}/getcontactslists` (rápido)\n- Delta > 500 o sync completa → paginación `/listrecipient` completa\n\n**Retry:** todos los HTTP 5×5s · batchInterval 1500ms\n**Limit:** 1000 registros/request\n\nCredenciales: siempre desde el gestor de credenciales de n8n.\n⚠️ Antes de la primera ejecución ejecutar ALTER TABLE (ver doc externa).",
+        "height": 220
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [25152, 976],
+      "id": "f6774d3d-d551-448d-bc73-92b8fc9e1781",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) AS pg_count, MAX(last_sync) AS last_sync FROM contactos.contactos",
+        "options": {}
+      },
+      "id": "5544c63d-467a-47f0-a056-e9a2c0c27ea6",
+      "name": "Postgres GET MAX last_sync",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [27296, 1408],
+      "credentials": {
+        "postgres": {
+          "id": "kF6UjQ8hguq0ltLd",
+          "name": "Postgres - n8n-whatsapp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convierte MAX(last_sync) de Postgres a Unix timestamp.\n// Incluye pg_count para detectar contactos nuevos en Mailjet.\n// Fuerza sync completa (ts=0):\n//   - Los domingos (garantía de consistencia semanal)\n//   - Si force_full=true en el Manual Trigger (forzado manual)\nconst raw     = $input.first().json.last_sync;\nconst pgCount = Number($input.first().json.pg_count ?? 0);\n\nconst esDomingoSync = new Date().getDay() === 0;\n\n// Ejecución manual → sync completa por defecto.\n// Motivo: los cambios manuales de propiedades en Mailjet NO actualizan LastActivityAt,\n// así que la delta nunca los detectaría. Si quieres forzar delta en manual,\n// pasa force_full=false explícitamente en el trigger.\nlet forceFull = false;\ntry {\n  const manualNode = $('When clicking \\'Execute workflow\\'');\n  if (manualNode.isExecuted) {\n    // Por defecto true en manual; false solo si se pasa explícitamente\n    forceFull = Boolean(manualNode.first()?.json?.force_full ?? true);\n  }\n} catch(e) {\n  forceFull = false;\n}\n\nconst ts = (raw && !esDomingoSync && !forceFull)\n  ? Math.floor(new Date(raw).getTime() / 1000)\n  : 0;\n\nreturn [{\n  json: {\n    last_sync_unix: ts,\n    pg_count:       pgCount,\n    force_full:     forceFull,\n    ts_inicio:      Date.now(),\n    fecha_inicio:   new Date().toISOString()\n  }\n}];\n"
+      },
+      "id": "9b059443-1a4a-44e7-a5df-185dfecab6c7",
+      "name": "Code Preparar Contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [27520, 1408]
+    },
+    {
+      "parameters": {
+        "url": "https://api.mailjet.com/v3/REST/contact",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mailjetEmailApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "CountOnly", "value": "1" }]
+        },
+        "options": {}
+      },
+      "id": "a85d399d-8f03-4ecc-837f-5601efb19a99",
+      "name": "HTTP Conteo Total Mailjet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [27744, 1504],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mailjetEmailApi": {
+          "id": "LTSvuIs0V4F6ScZE",
+          "name": "Mailjet - Grupo Vemare"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.mailjet.com/v3/REST/contact",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mailjetEmailApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "CountOnly", "value": "1" },
+            { "name": "LastActivityAt", "value": "={{ $json.last_sync_unix }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e35970fc-e547-4df1-80cb-2da040989745",
+      "name": "HTTP Conteo Total Delta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [27744, 1312],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mailjetEmailApi": {
+          "id": "LTSvuIs0V4F6ScZE",
+          "name": "Mailjet - Grupo Vemare"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "db16d73d-1a54-4625-bd25-821da2b8874f",
+      "name": "Merge Combinar Conteos",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [27968, 1408]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compara conteo delta (LastActivityAt) vs total Mailjet vs total Postgres.\n// Si hay contactos nuevos en Mailjet → fuerza sync completa (ts_efectivo = 0).\n// Si solo hay actividad email → sync parcial con ts original.\n// Expone total_a_procesar para que Code Generar Páginas calcule las páginas correctas.\nconst items = $input.all();\nconst ctx   = $('Code Preparar Contexto').first().json;\n\nconst totales      = items.map(i => Number(i.json.Total ?? 0));\nconst deltaTotal   = Math.min(...totales); // filtrado por LastActivityAt → ≤ total\nconst mailjetTotal = Math.max(...totales); // sin filtro → el mayor\n\nconst hayNuevos      = mailjetTotal > ctx.pg_count;\nconst tsEfectivo     = hayNuevos ? 0 : ctx.last_sync_unix;\nconst totalAProcesar = hayNuevos ? mailjetTotal : deltaTotal;\nconst hayCambios     = totalAProcesar > 0;\n\nreturn [{\n  json: {\n    ts_efectivo:      tsEfectivo,\n    hay_cambios:      hayCambios,\n    total_a_procesar: totalAProcesar,\n    hay_nuevos:       hayNuevos,\n    delta_total:      deltaTotal,\n    mailjet_total:    mailjetTotal,\n    pg_count:         ctx.pg_count,\n    ts_inicio:        ctx.ts_inicio,\n    fecha_inicio:     ctx.fecha_inicio\n  }\n}];"
+      },
+      "id": "318bebb4-fa95-4055-ad69-481136627565",
+      "name": "Code Decidir ts_efectivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [28192, 1408]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "filter-sync-01",
+              "leftValue": "={{ $json.total_a_procesar }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "076f8793-543b-4bf0-85f0-763f501d8325",
+      "name": "[Filter] ¿Hay cambios?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [28416, 1408]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Genera un item por página a paginar.\n// Usa total_a_procesar: puede ser delta o total Mailjet si hay nuevos contactos.\n// Propaga ts_efectivo como last_sync_unix para el filtro de HTTP GET Contacts Page.\nconst total = Number($json.total_a_procesar ?? 0);\nconst limit = 1000;\nconst pages = Math.max(1, Math.ceil(total / limit));\nconst ts_efectivo = $('Code Decidir ts_efectivo').first().json.ts_efectivo;\nreturn Array.from({ length: pages }, (_, i) => ({\n  json: { offset: i * limit, pageLimit: limit, last_sync_unix: ts_efectivo }\n}));"
+      },
+      "id": "68ff9c43-4d01-4ee9-91b7-9880e708d5dc",
+      "name": "Code Generar Páginas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [28640, 1408]
+    },
+    {
+      "parameters": {
+        "url": "https://api.mailjet.com/v3/REST/contact",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mailjetEmailApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "Limit", "value": "={{ $json.pageLimit }}" },
+            { "name": "Offset", "value": "={{ $json.offset }}" },
+            { "name": "LastActivityAt", "value": "={{ $json.last_sync_unix }}" }
+          ]
+        },
+        "options": {
+          "batching": { "batch": { "batchSize": 1, "batchInterval": 1500 } }
+        }
+      },
+      "id": "36c4244f-c82f-4d76-b418-9dd32d02f3f1",
+      "name": "HTTP GET Contacts Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [28864, 1408],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mailjetEmailApi": {
+          "id": "LTSvuIs0V4F6ScZE",
+          "name": "Mailjet - Grupo Vemare"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "gc-01", "name": "_contacts", "value": "={{ $json.Data }}", "type": "array" },
+            { "id": "gc-02", "name": "_offset", "value": "={{ $('Code Generar Páginas').item.json.offset }}", "type": "number" },
+            { "id": "gc-03", "name": "_limit", "value": "={{ $('Code Generar Páginas').item.json.pageLimit }}", "type": "number" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "272dacdc-3a47-48cb-89f1-443712fbe7a6",
+      "name": "Set Guardar Contexto",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [29088, 1408]
+    },
+    {
+      "parameters": {
+        "url": "https://api.mailjet.com/v3/REST/contactdata",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mailjetEmailApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "Limit", "value": "1000" },
+            { "name": "Offset", "value": "={{ $node[\"Code Generar Páginas\"].json.offset }}" }
+          ]
+        },
+        "options": {
+          "batching": { "batch": { "batchSize": 1, "batchInterval": 1500 } }
+        }
+      },
+      "id": "49ac9b58-0de2-478d-8042-afe7f2cc47db",
+      "name": "HTTP GET ContactData Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [29312, 1408],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mailjetEmailApi": {
+          "id": "LTSvuIs0V4F6ScZE",
+          "name": "Mailjet - Grupo Vemare"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const now      = new Date().toISOString();\nconst contacts = $('Set Guardar Contexto').item.json._contacts || [];\nconst dataRows = $input.item.json.Data || [];\n\nconst fields = [\"nombre\",\"poblacion\",\"provincia\",\"zona_geografica\",\"zona_comercial\",\n  \"estado\",\"razon_social\",\"centro_reparto\",\"comercial_recambio\",\"comercial_equipamiento\",\n  \"comercial_pincar\",\"comercial_redes\",\"coordinador_recambio\",\"canal\",\"tipo_cliente\",\"red\",\n  \"sub_red\",\"subcanal\",\"division\",\"envio_promociones\",\"tipo_cliente_dto\",\"activo\",\"distribuidor\",\"cif\",\n  \"distribuidor_vemare\",\"distribuidor_transcose\",\"distribuidor_dieseliberia\",\"distribuidor_paher\",\n  \"codigo_isi_vemare\",\"codigo_isi_transcose\",\"codigo_isi_dieseliberia\",\"codigo_isi_paher\"];\n\nconst clasificarTelefono = (raw) => {\n  if (!raw) return { normalizado: '', tipo: 'vacio' };\n  let digits = String(raw).replace(/\\D/g, '');\n  if (digits.startsWith('0034') && digits.length === 13) digits = digits.slice(4);\n  else if (digits.startsWith('34') && digits.length === 11) digits = digits.slice(2);\n  if (digits.length !== 9) return { normalizado: '', tipo: 'invalido' };\n  const inicio = digits[0];\n  if (inicio === '6' || inicio === '7') return { normalizado: '+34' + digits, tipo: 'movil' };\n  if (inicio === '9' || inicio === '8') return { normalizado: '+34' + digits, tipo: 'fijo' };\n  return { normalizado: '', tipo: 'invalido' };\n};\n\nconst propMap = {};\nfor (const row of dataRows) {\n  const props = {};\n  for (const p of (row.Data || [])) props[p.Name] = p.Value;\n  propMap[String(row.ContactID)] = props;\n}\n\nreturn contacts.map(c => {\n  const props = propMap[String(c.ID)] || {};\n  const row = { id: c.ID, email: c.Email, last_sync: now };\n  for (const f of fields) row[f] = props[f] ?? '';\n  const t1 = clasificarTelefono(props.telefono_1);\n  const t2 = clasificarTelefono(props.telefono_2);\n  row.telefono_1      = t1.normalizado;\n  row.telefono_1_tipo = t1.tipo;\n  row.telefono_2      = t2.normalizado;\n  row.telefono_2_tipo = t2.tipo;\n  row.telefono_wa     = t1.tipo === 'movil' ? t1.normalizado\n                      : t2.tipo === 'movil' ? t2.normalizado\n                      : '';\n  row.listas_mailjet  = '';\n  return { json: row };\n});"
+      },
+      "id": "9fc66d8c-6ea8-4cb9-9855-e1fb18f9d3c0",
+      "name": "Code Unir y Normalizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [29536, 1408]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Colapsa los N contactos delta a 1 item para que Wait y Fase 2\n// se ejecuten una sola vez independientemente del número de páginas.\nreturn [{ json: { ok: true } }];"
+      },
+      "id": "b42c7527-a31c-4ed8-987b-f15b8af24164",
+      "name": "Collapse → Fase 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [29760, 1408]
+    },
+    {
+      "parameters": { "amount": 30 },
+      "id": "707fa463-9b33-417b-8245-9322b185d618",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [29984, 1408],
+      "webhookId": "c3b80db9-3b02-4900-82c5-98696d11134a"
+    },
+    {
+      "parameters": {
+        "url": "https://api.mailjet.com/v3/REST/listrecipient",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mailjetEmailApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "CountOnly", "value": "1" },
+            { "name": "IsUnsubscribed", "value": "false" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "30dc8d8c-6f99-4bcc-bfb3-79edffe83a70",
+      "name": "HTTP Conteo Listas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [30432, 1216],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mailjetEmailApi": {
+          "id": "LTSvuIs0V4F6ScZE",
+          "name": "Mailjet - Grupo Vemare"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const total = Number($json.Total ?? 0);\nconst limit = 1000;\nconst pages = Math.max(1, Math.ceil(total / limit));\nreturn Array.from({ length: pages }, (_, i) => ({\n  json: { offset: i * limit, pageLimit: limit }\n}));"
+      },
+      "id": "e9ddc1b3-d9af-4347-aee5-209fb0ae9cf4",
+      "name": "Code Generar Páginas Listas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [30656, 1216]
+    },
+    {
+      "parameters": {
+        "url": "https://api.mailjet.com/v3/REST/listrecipient",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mailjetEmailApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "Limit", "value": "1000" },
+            { "name": "Offset", "value": "={{ $json.offset }}" },
+            { "name": "IsUnsubscribed", "value": "false" }
+          ]
+        },
+        "options": {
+          "batching": { "batch": { "batchSize": 1, "batchInterval": 1500 } }
+        }
+      },
+      "id": "18e36a45-e89d-442a-959a-295e0993c234",
+      "name": "HTTP GET ListRecipient Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [30880, 1216],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mailjetEmailApi": {
+          "id": "LTSvuIs0V4F6ScZE",
+          "name": "Mailjet - Grupo Vemare"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Solo procesa los contactos que forman parte del delta (Fase 1).\n// Fase 2 siempre descarga todas las listas de Mailjet, pero solo\n// emite filas para los contactos que cambiaron en esta ejecución.\n\nconst deltaItems = $('Code Unir y Normalizar').all();\nconst deltaIds   = new Set(deltaItems.map(i => String(i.json.id)));\n\n// Lookup de datos completos por id\nconst contactMap = {};\nfor (const item of deltaItems) {\n  contactMap[String(item.json.id)] = item.json;\n}\n\n// Acumular listas solo para ids delta\nconst listasMapa = {};\nfor (const item of $input.all()) {\n  for (const row of (item.json.Data || [])) {\n    const cid = String(row.ContactID);\n    if (!deltaIds.has(cid)) continue;\n    const lista = row.ContactsListName || String(row.ListID);\n    if (!listasMapa[cid]) listasMapa[cid] = new Set();\n    listasMapa[cid].add(lista);\n  }\n}\n\n// Emitir fila completa por cada contacto delta\nreturn [...deltaIds].map(cid => {\n  const c = contactMap[cid] || {};\n  return {\n    json: {\n      id_mailjet:             Number(cid),\n      listas_mailjet:         listasMapa[cid] ? [...listasMapa[cid]].join(',') : '',\n      email:                  c.email ?? '',\n      last_sync:              c.last_sync ?? '',\n      nombre:                 c.nombre ?? '',\n      poblacion:              c.poblacion ?? '',\n      razon_social:           c.razon_social ?? '',\n      provincia:              c.provincia ?? '',\n      zona_geografica:        c.zona_geografica ?? '',\n      zona_comercial:         c.zona_comercial ?? '',\n      estado:                 c.estado ?? '',\n      centro_reparto:         c.centro_reparto ?? '',\n      comercial_recambio:     c.comercial_recambio ?? '',\n      comercial_equipamiento: c.comercial_equipamiento ?? '',\n      comercial_pincar:       c.comercial_pincar ?? '',\n      comercial_redes:        c.comercial_redes ?? '',\n      coordinador_recambio:   c.coordinador_recambio ?? '',\n      canal:                  c.canal ?? '',\n      tipo_cliente:           c.tipo_cliente ?? '',\n      red:                    c.red ?? '',\n      sub_red:                c.sub_red ?? '',\n      subcanal:               c.subcanal ?? '',\n      division:               c.division ?? '',\n      envio_promociones:      c.envio_promociones ?? '',\n      tipo_cliente_dto:       c.tipo_cliente_dto ?? '',\n      activo:                 c.activo ?? '',\n      distribuidor:           c.distribuidor ?? '',\n      cif:                    c.cif ?? '',\n      telefono_1:             c.telefono_1 ?? '',\n      telefono_1_tipo:        c.telefono_1_tipo ?? '',\n      telefono_2:             c.telefono_2 ?? '',\n      telefono_2_tipo:        c.telefono_2_tipo ?? '',\n      telefono_wa:            c.telefono_wa ?? '',\n      distribuidor_vemare:     c.distribuidor_vemare ?? '',\n      distribuidor_transcose:  c.distribuidor_transcose ?? '',\n      distribuidor_dieseliberia: c.distribuidor_dieseliberia ?? '',\n      distribuidor_paher:      c.distribuidor_paher ?? '',\n      codigo_isi_vemare:       c.codigo_isi_vemare ?? '',\n      codigo_isi_transcose:    c.codigo_isi_transcose ?? '',\n      codigo_isi_dieseliberia: c.codigo_isi_dieseliberia ?? '',\n      codigo_isi_paher:        c.codigo_isi_paher ?? ''\n    }\n  };\n});"
+      },
+      "id": "712358b5-950a-4660-b03e-843eac3d1535",
+      "name": "Code Consolidar Listas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [31104, 1216]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "contactos"
+        },
+        "table": {
+          "__rl": true,
+          "value": "contactos",
+          "mode": "list",
+          "cachedResultName": "contactos"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id_mailjet": "={{ $json.id_mailjet }}",
+            "email": "={{ $json.email }}",
+            "last_sync": "={{ $json.last_sync }}",
+            "nombre": "={{ $json.nombre }}",
+            "poblacion": "={{ $json.poblacion }}",
+            "razon_social": "={{ $json.razon_social }}",
+            "provincia": "={{ $json.provincia }}",
+            "zona_geografica": "={{ $json.zona_geografica }}",
+            "zona_comercial": "={{ $json.zona_comercial }}",
+            "estado": "={{ $json.estado }}",
+            "centro_reparto": "={{ $json.centro_reparto }}",
+            "comercial_recambio": "={{ $json.comercial_recambio }}",
+            "comercial_equipamiento": "={{ $json.comercial_equipamiento }}",
+            "comercial_pincar": "={{ $json.comercial_pincar }}",
+            "comercial_redes": "={{ $json.comercial_redes }}",
+            "coordinador_recambio": "={{ $json.coordinador_recambio }}",
+            "canal": "={{ $json.canal }}",
+            "tipo_cliente": "={{ $json.tipo_cliente }}",
+            "red": "={{ $json.red }}",
+            "sub_red": "={{ $json.sub_red }}",
+            "subcanal": "={{ $json.subcanal }}",
+            "division": "={{ $json.division }}",
+            "envio_promociones": "={{ $json.envio_promociones }}",
+            "tipo_cliente_dto": "={{ $json.tipo_cliente_dto }}",
+            "activo": "={{ $json.activo }}",
+            "distribuidor": "={{ $json.distribuidor }}",
+            "cif": "={{ $json.cif }}",
+            "telefono_1": "={{ $json.telefono_1 }}",
+            "telefono_1_tipo": "={{ $json.telefono_1_tipo }}",
+            "telefono_2": "={{ $json.telefono_2 }}",
+            "telefono_2_tipo": "={{ $json.telefono_2_tipo }}",
+            "telefono_wa": "={{ $json.telefono_wa }}",
+            "listas_mailjet": "={{ $json.listas_mailjet }}",
+            "distribuidor_vemare": "={{ $json.distribuidor_vemare }}",
+            "distribuidor_transcose": "={{ $json.distribuidor_transcose }}",
+            "distribuidor_dieseliberia": "={{ $json.distribuidor_dieseliberia }}",
+            "distribuidor_paher": "={{ $json.distribuidor_paher }}",
+            "codigo_isi_vemare": "={{ $json.codigo_isi_vemare }}",
+            "codigo_isi_transcose": "={{ $json.codigo_isi_transcose }}",
+            "codigo_isi_dieseliberia": "={{ $json.codigo_isi_dieseliberia }}",
+            "codigo_isi_paher": "={{ $json.codigo_isi_paher }}"
+          },
+          "matchingColumns": ["id_mailjet"],
+          "schema": [
+            { "id": "id_mailjet", "displayName": "id_mailjet", "required": true, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": true, "removed": false },
+            { "id": "email", "displayName": "email", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "nombre", "displayName": "nombre", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "razon_social", "displayName": "razon_social", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "poblacion", "displayName": "poblacion", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "provincia", "displayName": "provincia", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "zona_geografica", "displayName": "zona_geografica", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "zona_comercial", "displayName": "zona_comercial", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "estado", "displayName": "estado", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "centro_reparto", "displayName": "centro_reparto", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "comercial_recambio", "displayName": "comercial_recambio", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "comercial_equipamiento", "displayName": "comercial_equipamiento", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "comercial_pincar", "displayName": "comercial_pincar", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "comercial_redes", "displayName": "comercial_redes", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "coordinador_recambio", "displayName": "coordinador_recambio", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "canal", "displayName": "canal", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "tipo_cliente", "displayName": "tipo_cliente", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "red", "displayName": "red", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "sub_red", "displayName": "sub_red", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "subcanal", "displayName": "subcanal", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "division", "displayName": "division", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "envio_promociones", "displayName": "envio_promociones", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "tipo_cliente_dto", "displayName": "tipo_cliente_dto", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "activo", "displayName": "activo", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "distribuidor", "displayName": "distribuidor", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "cif", "displayName": "cif", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "telefono_1", "displayName": "telefono_1", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "telefono_1_tipo", "displayName": "telefono_1_tipo", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "telefono_2", "displayName": "telefono_2", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "telefono_2_tipo", "displayName": "telefono_2_tipo", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "telefono_wa", "displayName": "telefono_wa", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "listas_mailjet", "displayName": "listas_mailjet", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "last_sync", "displayName": "last_sync", "required": false, "defaultMatch": false, "display": true, "type": "dateTime", "canBeUsedToMatch": false },
+            { "id": "distribuidor_vemare", "displayName": "distribuidor_vemare", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "distribuidor_transcose", "displayName": "distribuidor_transcose", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "distribuidor_dieseliberia", "displayName": "distribuidor_dieseliberia", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "distribuidor_paher", "displayName": "distribuidor_paher", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "codigo_isi_vemare", "displayName": "codigo_isi_vemare", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "codigo_isi_transcose", "displayName": "codigo_isi_transcose", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "codigo_isi_dieseliberia", "displayName": "codigo_isi_dieseliberia", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "codigo_isi_paher", "displayName": "codigo_isi_paher", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "1e58dcee-b4be-40ab-a2e1-8d01b3e8c813",
+      "name": "Postgres Upsert Contactos y Listas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [31392, 1408],
+      "credentials": {
+        "postgres": {
+          "id": "kF6UjQ8hguq0ltLd",
+          "name": "Postgres - n8n-whatsapp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 📦 Fase 1: Delta sync de contactos\n\n**Postgres GET MAX last_sync** recupera última sync + total en BD.\n**Code Preparar Contexto** convierte a Unix, detecta domingo y `force_full`.\n**HTTP Conteo Total Delta** — delta por `LastActivityAt`.\n**HTTP Conteo Total Mailjet** — total sin filtro (detecta nuevos).\n**Code Decidir ts_efectivo** — decide sync parcial o total.\n**[Filter] ¿Hay cambios?** — corta si no hay nada que sincronizar.\n\nLimit: 1000 · batchInterval: 1500ms · Retry: 5×5s"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [27280, 1632],
+      "id": "93778294-b40a-4a80-9ca5-621336ea8839",
+      "name": "Sticky Fase "
+    },
+    {
+      "parameters": {
+        "content": "## 🔍 Detección de cambios mejorada\n**Rama A** — `HTTP Conteo Total1`: contactos con actividad email (delta).\n**Rama B** — `HTTP Conteo Total Mailjet`: TODOS los contactos sin filtro.\n**Merge**: combina ambos conteos (modo append → 2 items).\n**Code Decidir ts_efectivo**:\n- `mailjet_total > pg_count` → hay nuevos → `ts_efectivo = 0` (sync completa)\n- `delta_total > 0` → solo actividad → `ts_efectivo = last_sync_unix` (delta)\n- Ninguno → no hay cambios → Filter corta el flujo.\n**Fix**: contactos nuevos sin actividad email ya son capturados."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [27728, 1632],
+      "id": "d290cfb9-c08f-4613-9643-403d34640a85",
+      "name": "Sticky Decidir ts_efectivo"
+    },
+    {
+      "parameters": {
+        "content": "## ⚡ Code Unir y Normalizar\nModo: Run Once for Each Item\nProcesa 1 página por ejecución.\nNO cambiar a 'Run Once for All Items' → OOM risk.\nUsa `$('Set Guardar Contexto').item` (no `.all()`)"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [29472, 1632],
+      "id": "9a2a63dd-1fa8-4d8f-a9d4-e00daf017507",
+      "name": "Sticky Code Normalizar"
+    },
+    {
+      "parameters": {
+        "content": "## 🗄️ Fase 2: Listas Mailjet\nDescarga **todas** las listas de Mailjet.\n**Code Consolidar Listas** hace el join con el delta de Fase 1\ny descarta los contactos que no cambiaron.\nSolo se upsertean los contactos del delta con sus listas actualizadas."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [31040, 1632],
+      "id": "cc991043-5ddd-48d0-bcf4-072a5abdad17",
+      "name": "Sticky Fase 3"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 3 * * *" }]
+        }
+      },
+      "id": "f79b62a8-88c3-4005-b586-bcac5ba50efe",
+      "name": "Cron Diario 3:",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [27072, 1312]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calcula métricas de la ejecución y prepara el registro de log.\n// ts_inicio y fecha_inicio se leen desde Code Preparar Contexto.\n// NOTA: Habilitar este nodo cuando la tabla sync_log esté creada.\nconst tsInicio    = $('Code Preparar Contexto').first().json.ts_inicio;\nconst fechaInicio = $('Code Preparar Contexto').first().json.fecha_inicio;\nconst contactosProcesados = $('Code Consolidar Listas').all().length;\nconst fechaFin   = new Date().toISOString();\nconst duracionMs = Date.now() - tsInicio;\n\nreturn [{\n  json: {\n    fecha_inicio:         fechaInicio,\n    fecha_fin:            fechaFin,\n    duracion_ms:          duracionMs,\n    contactos_procesados: contactosProcesados,\n    estado:               'ok'\n  }\n}];"
+      },
+      "id": "c2786f38-33f0-48a0-b110-8b2fb97af731",
+      "name": "Code Preparar Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [31616, 1408],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "schema": { "__rl": true, "mode": "list", "value": "public" },
+        "table": { "__rl": true, "value": "sync_log", "mode": "list", "cachedResultName": "sync_log" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fecha_inicio": "={{ $json.fecha_inicio }}",
+            "fecha_fin": "={{ $json.fecha_fin }}",
+            "duracion_ms": "={{ $json.duracion_ms }}",
+            "contactos_procesados": "={{ $json.contactos_procesados }}",
+            "estado": "={{ $json.estado }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "fecha_inicio", "displayName": "fecha_inicio", "required": true, "defaultMatch": false, "display": true, "type": "dateTime", "canBeUsedToMatch": false },
+            { "id": "fecha_fin", "displayName": "fecha_fin", "required": true, "defaultMatch": false, "display": true, "type": "dateTime", "canBeUsedToMatch": false },
+            { "id": "duracion_ms", "displayName": "duracion_ms", "required": true, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": false },
+            { "id": "contactos_procesados", "displayName": "contactos_procesados", "required": true, "defaultMatch": false, "display": true, "type": "number", "canBeUsedToMatch": false },
+            { "id": "estado", "displayName": "estado", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "49552763-9563-4801-9dd9-253626269260",
+      "name": "Postgres Insert Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [31840, 1408],
+      "credentials": {
+        "postgres": {
+          "id": "kF6UjQ8hguq0ltLd",
+          "name": "Postgres - n8n-whatsapp"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "## 📊 Log de ejecución\n**Code Preparar Log** calcula duración total y nº de contactos procesados.\n**Postgres Insert Log** inserta en `sync_log`.\nAusencia de entrada = no hubo cambios esa noche (el Filter cortó el flujo).\nConsulta rápida: `SELECT * FROM sync_log ORDER BY fecha_inicio DESC LIMIT 30;`\n⚠️ Habilitar ambos nodos cuando sync_log esté creada en Postgres."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [31760, 1728],
+      "id": "310a0e44-4456-4480-bcb4-21bbe7a4e157",
+      "name": "Sticky Log"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "cond-ts-cero", "leftValue": "={{ $('Code Decidir ts_efectivo').first().json.ts_efectivo }}", "rightValue": 0, "operator": { "type": "number", "operation": "equals" } },
+                  { "id": "cond-umbral-volumen", "leftValue": "={{ $('Code Decidir ts_efectivo').first().json.total_a_procesar }}", "rightValue": 500, "operator": { "type": "number", "operation": "gt" } }
+                ],
+                "combinator": "or"
+              },
+              "renameOutput": true,
+              "outputKey": "sync_completa"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "cond-ts-no-cero", "leftValue": "={{ $('Code Decidir ts_efectivo').first().json.ts_efectivo }}", "rightValue": 0, "operator": { "type": "number", "operation": "notEquals" } },
+                  { "id": "cond-umbral-ok", "leftValue": "={{ $('Code Decidir ts_efectivo').first().json.total_a_procesar }}", "rightValue": 500, "operator": { "type": "number", "operation": "lte" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "delta"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e76fa114-85e3-4fa6-9595-32763b64537c",
+      "name": "[Switch] ¿Sync completa Listas?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [30208, 1408]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrae los IDs Mailjet del delta de Fase 1.\n// Genera 1 item por contacto con su idmailjet para el HTTP batch.\nconst deltaItems = $('Code Unir y Normalizar').all();\nreturn deltaItems.map(item => ({\n  json: { idmailjet: item.json.id }\n}));\n"
+      },
+      "id": "bb378464-ef24-410f-8229-b808e1cefcdc",
+      "name": "Code IDs Delta para Listas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [30432, 1616]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.mailjet.com/v3/REST/contact/{{ $json.idmailjet }}/getcontactslists",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mailjetEmailApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "IsUnsubscribed", "value": "false" }]
+        },
+        "options": {
+          "batching": { "batch": { "batchSize": 1, "batchInterval": 1500 } }
+        }
+      },
+      "id": "5be1e5d7-1181-4e6e-8788-0cd327aa4fa6",
+      "name": "HTTP GET GetContactsLists",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [30656, 1616],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "mailjetEmailApi": {
+          "id": "LTSvuIs0V4F6ScZE",
+          "name": "Mailjet - Grupo Vemare"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recibe N responses de getcontactslists (1 por contacto del delta).\n// Construye el mismo formato que Code Consolidar Listas1 para reutilizar el Upsert.\nconst deltaItems = $('Code Unir y Normalizar').all();\nconst deltaIds   = $('Code IDs Delta para Listas').all();\nconst contactMap = {};\nfor (const item of deltaItems) {\n  contactMap[String(item.json.id)] = item.json;\n}\n\n// input.all() tiene 1 item por contacto con json.Data = [{ListID, Name, ...}]\nreturn $input.all().map((item, idx) => {\n  const id_mailjet = deltaIds[idx]?.json.idmailjet;\n  const c = contactMap[String(id_mailjet)] ?? {};\n  const listas_mailjet = (item.json.Data ?? [])\n    .map(l => (l.Name || String(l.ListID)))\n    .join(',');\n\n  return {\n    json: {\n      id_mailjet,\n      listas_mailjet,\n      email:                    c.email ?? '',\n      last_sync:                c.last_sync ?? '',\n      nombre:                   c.nombre ?? '',\n      poblacion:                c.poblacion ?? '',\n      razon_social:             c.razon_social ?? '',\n      provincia:                c.provincia ?? '',\n      zona_geografica:          c.zona_geografica ?? '',\n      zona_comercial:           c.zona_comercial ?? '',\n      estado:                   c.estado ?? '',\n      centro_reparto:           c.centro_reparto ?? '',\n      comercial_recambio:       c.comercial_recambio ?? '',\n      comercial_equipamiento:   c.comercial_equipamiento ?? '',\n      comercial_pincar:         c.comercial_pincar ?? '',\n      comercial_redes:          c.comercial_redes ?? '',\n      coordinador_recambio:     c.coordinador_recambio ?? '',\n      canal:                    c.canal ?? '',\n      tipo_cliente:             c.tipo_cliente ?? '',\n      red:                      c.red ?? '',\n      sub_red:                  c.sub_red ?? '',\n      subcanal:                 c.subcanal ?? '',\n      division:                 c.division ?? '',\n      envio_promociones:        c.envio_promociones ?? '',\n      tipo_cliente_dto:         c.tipo_cliente_dto ?? '',\n      activo:                   c.activo ?? '',\n      distribuidor:             c.distribuidor ?? '',\n      cif:                      c.cif ?? '',\n      telefono_1:               c.telefono_1 ?? '',\n      telefono_1_tipo:          c.telefono_1_tipo ?? '',\n      telefono_2:               c.telefono_2 ?? '',\n      telefono_2_tipo:          c.telefono_2_tipo ?? '',\n      telefono_wa:              c.telefono_wa ?? '',\n      distribuidor_vemare:      c.distribuidor_vemare ?? '',\n      distribuidor_transcose:   c.distribuidor_transcose ?? '',\n      distribuidor_dieseliberia: c.distribuidor_dieseliberia ?? '',\n      distribuidor_paher:       c.distribuidor_paher ?? '',\n      codigo_isi_vemare:        c.codigo_isi_vemare ?? '',\n      codigo_isi_transcose:     c.codigo_isi_transcose ?? '',\n      codigo_isi_dieseliberia:  c.codigo_isi_dieseliberia ?? '',\n      codigo_isi_paher:         c.codigo_isi_paher ?? ''\n    }\n  };\n});\n"
+      },
+      "id": "74e03e6b-8204-4233-982c-e96b8218ddf8",
+      "name": "Code Merge Listas Delta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [30880, 1616]
+    },
+    {
+      "parameters": {
+        "content": "## ⚙️ Fase 2 — Listas\n\n**Switch ¿Sync completa?** — lógica OR/AND:\n\n→ **sync_completa** si:\n  `ts_efectivo = 0` **OR** `total_a_procesar > 500`\n  → Paginación `/listrecipient` (~75 págs × 1000)\n\n→ **delta** si:\n  `ts_efectivo ≠ 0` **AND** `total_a_procesar ≤ 500`\n  → `/contact/{id}/getcontactslists` (N req × 1.5s)\n\n**batchInterval:** 1500ms en todos los nodos HTTP\n**Retry:** 5 intentos × 5s en caso de 429",
+        "height": 230,
+        "width": 380,
+        "color": 3
+      },
+      "id": "130234a3-4b4d-460c-8c68-b3a07f9ce94e",
+      "name": "Sticky Fase 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [30128, 912]
+    },
+    {
+      "parameters": {
+        "content": "## 🔧 Forzar Sync Completa Manual\n\n1. Haz clic en **'Execute workflow'**\n2. En el campo `force_full` → activa a **`true`**\n3. Ejecuta\n\nEsto fuerza `ts_efectivo = 0` → sync total\nen Fase 1 (todos los contactos) y Fase 2\n(ruta `/listrecipient` completa).\n\nEl cron diario **ignora** `force_full` — solo\naplica cuando se ejecuta manualmente.",
+        "height": 200,
+        "width": 280,
+        "color": 4
+      },
+      "id": "08349ea4-bc79-49ee-b945-d8e4886befa0",
+      "name": "Sticky Force Full v11",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [26976, 1056]
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [27040, 1504],
+      "id": "7d687fd8-4fb9-4288-867e-1ed4bc375ac8",
+      "name": "When clicking 'Execute workflow'"
+    }
+  ],
+  "pinData": {
+    "Cron Diario 3:": [
+      {
+        "json": {
+          "timestamp": "2026-06-26T03:00:00.005+02:00",
+          "Readable date": "June 26th 2026, 3:00:00 am",
+          "Readable time": "3:00:00 am",
+          "Day of week": "Friday",
+          "Year": "2026",
+          "Month": "June",
+          "Day of month": "26",
+          "Hour": "03",
+          "Minute": "00",
+          "Second": "00",
+          "Timezone": "Europe/Madrid (UTC+02:00)"
+        },
+        "pairedItem": { "item": 0 }
+      }
+    ]
+  },
+  "connections": {
+    "Cron Diario 3:": {
+      "main": [[{ "node": "Postgres GET MAX last_sync", "type": "main", "index": 0 }]]
+    },
+    "Postgres GET MAX last_sync": {
+      "main": [[{ "node": "Code Preparar Contexto", "type": "main", "index": 0 }]]
+    },
+    "Code Preparar Contexto": {
+      "main": [[
+        { "node": "HTTP Conteo Total Delta", "type": "main", "index": 0 },
+        { "node": "HTTP Conteo Total Mailjet", "type": "main", "index": 0 }
+      ]]
+    },
+    "HTTP Conteo Total Delta": {
+      "main": [[{ "node": "Merge Combinar Conteos", "type": "main", "index": 0 }]]
+    },
+    "HTTP Conteo Total Mailjet": {
+      "main": [[{ "node": "Merge Combinar Conteos", "type": "main", "index": 1 }]]
+    },
+    "Merge Combinar Conteos": {
+      "main": [[{ "node": "Code Decidir ts_efectivo", "type": "main", "index": 0 }]]
+    },
+    "Code Decidir ts_efectivo": {
+      "main": [[{ "node": "[Filter] ¿Hay cambios?", "type": "main", "index": 0 }]]
+    },
+    "[Filter] ¿Hay cambios?": {
+      "main": [[{ "node": "Code Generar Páginas", "type": "main", "index": 0 }]]
+    },
+    "Code Generar Páginas": {
+      "main": [[{ "node": "HTTP GET Contacts Page", "type": "main", "index": 0 }]]
+    },
+    "HTTP GET Contacts Page": {
+      "main": [[{ "node": "Set Guardar Contexto", "type": "main", "index": 0 }]]
+    },
+    "Set Guardar Contexto": {
+      "main": [[{ "node": "HTTP GET ContactData Page", "type": "main", "index": 0 }]]
+    },
+    "HTTP GET ContactData Page": {
+      "main": [[{ "node": "Code Unir y Normalizar", "type": "main", "index": 0 }]]
+    },
+    "Code Unir y Normalizar": {
+      "main": [[{ "node": "Collapse → Fase 2", "type": "main", "index": 0 }]]
+    },
+    "Collapse → Fase 2": {
+      "main": [[{ "node": "Wait 30s", "type": "main", "index": 0 }]]
+    },
+    "Wait 30s": {
+      "main": [[{ "node": "[Switch] ¿Sync completa Listas?", "type": "main", "index": 0 }]]
+    },
+    "HTTP Conteo Listas": {
+      "main": [[{ "node": "Code Generar Páginas Listas", "type": "main", "index": 0 }]]
+    },
+    "Code Generar Páginas Listas": {
+      "main": [[{ "node": "HTTP GET ListRecipient Page", "type": "main", "index": 0 }]]
+    },
+    "HTTP GET ListRecipient Page": {
+      "main": [[{ "node": "Code Consolidar Listas", "type": "main", "index": 0 }]]
+    },
+    "Code Consolidar Listas": {
+      "main": [[{ "node": "Postgres Upsert Contactos y Listas", "type": "main", "index": 0 }]]
+    },
+    "Code Preparar Log": {
+      "main": [[{ "node": "Postgres Insert Log", "type": "main", "index": 0 }]]
+    },
+    "[Switch] ¿Sync completa Listas?": {
+      "main": [
+        [{ "node": "HTTP Conteo Listas", "type": "main", "index": 0 }],
+        [{ "node": "Code IDs Delta para Listas", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code IDs Delta para Listas": {
+      "main": [[{ "node": "HTTP GET GetContactsLists", "type": "main", "index": 0 }]]
+    },
+    "HTTP GET GetContactsLists": {
+      "main": [[{ "node": "Code Merge Listas Delta", "type": "main", "index": 0 }]]
+    },
+    "Code Merge Listas Delta": {
+      "main": [[{ "node": "Postgres Upsert Contactos y Listas", "type": "main", "index": 0 }]]
+    },
+    "When clicking 'Execute workflow'": {
+      "main": [[{ "node": "Postgres GET MAX last_sync", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "5f0mXhse1CsD1dLu",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "45170ced-0f42-47d0-9735-5bb7f6bc6322",
+  "meta": {
+    "instanceId": "9ede66a3b69f97a3badd83f3b84609d92fc89a18fcd47cc3e9ef268c1817f230"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

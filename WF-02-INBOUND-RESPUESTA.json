@@ -1,0 +1,311 @@
+{
+  "name": "WF-02-INBOUND-RESPUESTA (SWF-NORMALIZAR)",
+  "nodes": [
+    {
+      "id": "b2c3d4e5-0001-0001-0001-000000000001",
+      "name": "WhatsApp Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wa-inbound",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "b2c3d4e5-0002-0002-0002-000000000002",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [200, 160],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok"
+      }
+    },
+    {
+      "id": "b2c3d4e5-0003-0003-0003-000000000003",
+      "name": "Code: Validar firma X-Hub",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "parameters": {
+        "jsCode": "const crypto    = require('crypto');\nconst payload   = JSON.stringify($json.body);\nconst signature = $json.headers['x-hub-signature-256'];\nconst secret    = $env.WA_APP_SECRET;\n\nif (!secret) throw new Error('WA_APP_SECRET no configurado en el entorno de n8n');\n\nconst expected = 'sha256=' + crypto\n  .createHmac('sha256', secret)\n  .update(payload)\n  .digest('hex');\n\nif (!signature || signature !== expected) {\n  throw new Error('X-Hub-Signature-256 inválida — request rechazado');\n}\n\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "b2c3d4e5-0004-0004-0004-000000000004",
+      "name": "Code: Normalizar mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 400],
+      "parameters": {
+        "jsCode": "const entry   = $json.body?.entry?.[0];\nconst change  = entry?.changes?.[0]?.value;\n\n// Verificar si es un status (delivery) vs mensaje\nif (change?.statuses) {\n  return [{ json: { _tipo_evento: 'status', ...change.statuses[0] } }];\n}\n\nconst msg  = change?.messages?.[0];\nif (!msg) return [{ json: { _tipo_evento: 'otro' } }];\n\nconst tipo = msg.type;\nlet text_content     = '';\nlet flow_response    = null;\nlet flow_token       = '';\nlet is_flow_response = false;\n\nif (tipo === 'interactive') {\n  const ia = msg.interactive;\n  if (ia?.type === 'button_reply') {\n    text_content = ia.button_reply.id;\n  } else if (ia?.type === 'nfm_reply') {\n    flow_response    = JSON.parse(ia.nfm_reply.response_json);\n    flow_token       = flow_response.flow_token ?? '';\n    text_content     = 'nfm_reply';\n    is_flow_response = true;\n  }\n} else if (tipo === 'text') {\n  text_content = msg.text?.body?.toLowerCase().trim() || '';\n}\n\nreturn [{\n  json: {\n    _tipo_evento:    'mensaje',\n    waid:            msg.from,\n    db_phone:        msg.from,\n    text_content,\n    flow_response,\n    flow_token,\n    is_flow_response\n  }\n}];"
+      }
+    },
+    {
+      "id": "b2c3d4e5-0005-0005-0005-000000000005",
+      "name": "Switch: tipo evento",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [680, 400],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.is_flow_response }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "nfm_reply"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json._tipo_evento }}", "rightValue": "mensaje", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "chatbot"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "b2c3d4e5-0006-0006-0006-000000000006",
+      "name": "PG: Lookup por wa_flow_token",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [920, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ew.id, ew.id_campana, ew.codigo_isi, ew.razon_social, ew.telefono_wa,\n       ew.wa_flow_token,\n       cw.codigo_encuesta, cw.version_num, cw.codigo_empresa, cw.id_externo_collector\nFROM encuestas.envios_wa ew\nJOIN encuestas.campanas_wa cw ON cw.id = ew.id_campana\nWHERE ew.wa_flow_token = $1::uuid",
+        "additionalFields": {
+          "queryParams": "={{ [$json.flow_token].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0007-0007-0007-000000000007",
+      "name": "IF: ¿flow_token encontrado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1160, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.id }}",
+              "operator": { "type": "exists" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0008-0008-0008-000000000008",
+      "name": "Code: Log error flow_token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 180],
+      "parameters": {
+        "jsCode": "const flow_token = $('Code: Normalizar mensaje').item.json.flow_token;\nconsole.error(`flow_token no encontrado: ${flow_token}`);\nreturn [{ json: { status: 'error', reason: 'flow_token_not_found', flow_token } }];"
+      }
+    },
+    {
+      "id": "b2c3d4e5-0009-0009-0009-000000000009",
+      "name": "PG: Mapa preguntas y pesos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1400, 360],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  p.codigo_pregunta,\n  p.id_externo_pregunta,\n  p.orden,\n  lm.codigo_metrica,\n  pv.peso_final_calculado,\n  pv.version_num\nFROM maestro.encuestas_maestro em\nJOIN maestro.preguntas_maestro p\n  ON p.id_encuesta = em.id_encuesta AND p.pregunta_activa = true\nJOIN maestro.lista_metricas lm\n  ON lm.id_metrica = p.id_metrica\nJOIN maestro.ponderaciones_versiones pv\n  ON pv.id_encuesta = em.id_encuesta\n  AND pv.version_num = $2\n  AND pv.id_pregunta = p.id_pregunta\nWHERE em.codigo_encuesta = $1\nORDER BY p.orden",
+        "additionalFields": {
+          "queryParams": "={{ [$json.codigo_encuesta, $json.version_num].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0010-0010-0010-000000000010",
+      "name": "PG: Mapa opciones",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1640, 360],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT o.id_externo_opcion, o.valor_numerico, o.codigo_opcion, p.codigo_pregunta\nFROM maestro.encuestas_maestro em\nJOIN maestro.preguntas_maestro p\n  ON p.id_encuesta = em.id_encuesta AND p.pregunta_activa = true\nJOIN maestro.opciones_maestro o ON o.id_pregunta = p.id_pregunta\nWHERE em.codigo_encuesta = $1",
+        "additionalFields": {
+          "queryParams": "={{ [$('PG: Lookup por wa_flow_token').item.json.codigo_encuesta].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0011-0011-0011-000000000011",
+      "name": "Code: Construir filas respuestas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1880, 360],
+      "parameters": {
+        "jsCode": "// Tomar datos del lookup y de los mapas\nconst envio     = $('PG: Lookup por wa_flow_token').item.json;\nconst preguntas = $('PG: Mapa preguntas y pesos').all().map(i => i.json);\nconst opciones  = $('PG: Mapa opciones').all().map(i => i.json);\nconst flowResponse = $('Code: Normalizar mensaje').item.json.flow_response;\n\nif (!preguntas.length) {\n  throw new Error(`Sin preguntas en maestro para encuesta: ${envio.codigo_encuesta} v${envio.version_num}`);\n}\n\nconst filas = preguntas.map(pregunta => {\n  const valor_raw    = flowResponse[pregunta.id_externo_pregunta];\n  const esComentario = pregunta.codigo_metrica === 'COMENTARIO';\n\n  let valor_numerico        = null;\n  let valor_calculado       = null;\n  let respuesta_comentario  = null;\n\n  if (esComentario) {\n    respuesta_comentario = valor_raw ?? null;\n  } else {\n    const opcion = opciones.find(\n      o => o.codigo_pregunta === pregunta.codigo_pregunta && o.id_externo_opcion === valor_raw\n    );\n    valor_numerico  = opcion?.valor_numerico != null ? parseFloat(opcion.valor_numerico) : null;\n    const peso      = parseFloat(pregunta.peso_final_calculado || 0);\n    valor_calculado = (valor_numerico !== null && peso > 0)\n      ? parseFloat((valor_numerico * peso).toFixed(4))\n      : null;\n  }\n\n  return {\n    json: {\n      id_campana:           envio.id_campana,\n      id_envio:             envio.id,\n      codigo_encuesta:      envio.codigo_encuesta,\n      version_num:          envio.version_num,\n      codigo_pregunta:      pregunta.codigo_pregunta,\n      id_grupo_respuesta:   envio.wa_flow_token,\n      codigo_isi:           envio.codigo_isi,\n      razon_social:         envio.razon_social,\n      codigo_metrica:       pregunta.codigo_metrica,\n      peso_final_calculado: parseFloat(pregunta.peso_final_calculado || 0),\n      valor_numerico,\n      valor_calculado,\n      respuesta_comentario,\n      atributos_adicionales: JSON.stringify({\n        id_externo_pregunta: pregunta.id_externo_pregunta,\n        raw_value: valor_raw\n      }),\n      // para mutations monday\n      id_externo_collector: envio.id_externo_collector\n    }\n  };\n});\n\nreturn filas;"
+      }
+    },
+    {
+      "id": "b2c3d4e5-0012-0012-0012-000000000012",
+      "name": "Loop: Por pregunta",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2120, 360],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "b2c3d4e5-0013-0013-0013-000000000013",
+      "name": "PG: INSERT respuesta",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2360, 280],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO encuestas.respuestas_wa\n  (id_campana, id_envio, codigo_encuesta, version_num,\n   codigo_pregunta, id_grupo_respuesta,\n   codigo_isi, razon_social,\n   codigo_metrica, peso_final_calculado,\n   valor_numerico, valor_calculado,\n   respuesta_comentario, atributos_adicionales)\nVALUES ($1, $2::uuid, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)\nON CONFLICT (id_grupo_respuesta, codigo_pregunta) DO NOTHING",
+        "additionalFields": {
+          "queryParams": "={{ [\n  $json.id_campana,\n  $json.id_envio,\n  $json.codigo_encuesta,\n  $json.version_num,\n  $json.codigo_pregunta,\n  $json.id_grupo_respuesta,\n  $json.codigo_isi,\n  $json.razon_social,\n  $json.codigo_metrica,\n  $json.peso_final_calculado,\n  $json.valor_numerico,\n  $json.valor_calculado,\n  $json.respuesta_comentario,\n  $json.atributos_adicionales\n].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0014-0014-0014-000000000014",
+      "name": "PG: UPDATE respondido",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2360, 460],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE encuestas.envios_wa SET estado_entrega = 'respondido' WHERE wa_flow_token = $1::uuid",
+        "additionalFields": {
+          "queryParams": "={{ [$('PG: Lookup por wa_flow_token').item.json.wa_flow_token].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0015-0015-0015-000000000015",
+      "name": "HTTP: monday +1 respondido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2600, 460],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation {\n  monday_increment_column: change_column_value(\n    board_id: BOARD_ID,\n    item_id: \"${$('PG: Lookup por wa_flow_token').item.json.id_externo_collector}\",\n    column_id: \"num_respondidos\",\n    value: \"1\"\n  ) { id }\n}` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0016-0016-0016-000000000016",
+      "name": "NoOp: Chatbot (no modificar)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [920, 500],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "WhatsApp Trigger": {
+      "main": [
+        [{ "node": "Respond 200", "type": "main", "index": 0 }],
+        [{ "node": "Code: Validar firma X-Hub", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Validar firma X-Hub": {
+      "main": [[{ "node": "Code: Normalizar mensaje", "type": "main", "index": 0 }]]
+    },
+    "Code: Normalizar mensaje": {
+      "main": [[{ "node": "Switch: tipo evento", "type": "main", "index": 0 }]]
+    },
+    "Switch: tipo evento": {
+      "main": [
+        [{ "node": "PG: Lookup por wa_flow_token", "type": "main", "index": 0 }],
+        [{ "node": "NoOp: Chatbot (no modificar)", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Lookup por wa_flow_token": {
+      "main": [[{ "node": "IF: ¿flow_token encontrado?", "type": "main", "index": 0 }]]
+    },
+    "IF: ¿flow_token encontrado?": {
+      "main": [
+        [{ "node": "PG: Mapa preguntas y pesos", "type": "main", "index": 0 }],
+        [{ "node": "Code: Log error flow_token", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Mapa preguntas y pesos": {
+      "main": [[{ "node": "PG: Mapa opciones", "type": "main", "index": 0 }]]
+    },
+    "PG: Mapa opciones": {
+      "main": [[{ "node": "Code: Construir filas respuestas", "type": "main", "index": 0 }]]
+    },
+    "Code: Construir filas respuestas": {
+      "main": [[{ "node": "Loop: Por pregunta", "type": "main", "index": 0 }]]
+    },
+    "Loop: Por pregunta": {
+      "main": [
+        [{ "node": "PG: INSERT respuesta", "type": "main", "index": 0 }],
+        [{ "node": "PG: UPDATE respondido", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: UPDATE respondido": {
+      "main": [[{ "node": "HTTP: monday +1 respondido", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": [{ "name": "WA-INBOUND" }]
+}

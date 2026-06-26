@@ -1,0 +1,4 @@
+Name,Tipo,Modo de Envío,Status WA,Empresa WA,Segmento filtro,id encuesta maestro,Flow ID,Template WA,Texto cuerpo,URL destino,CSV manual,Imagen,Cache Media ID,Total enviados,Total entregados,Total respondidos,Fecha envío,Dispatch lock,Es prueba
+[EJEMPLO] Encuesta NPS Vemare Junio,ENCUESTA,EQUIPO,BORRADOR,VEMARE,,NPS_POSTVENTA_V1,1234567890,encuesta_wa,Hola {{1}} te enviamos una breve encuesta sobre tu experiencia reciente con {{2}},,,,,,,,,,true
+[EJEMPLO] Notificación Promo Transcose,NOTIFICACION,REAL Lista,BORRADOR,TRANSCOSE,PROMO_VERANO,,,,Hola {{1}} te informamos sobre nuestra nueva promoción de verano {{2}},https://www.transcose.es/promo,,,,,,,,false
+[EJEMPLO] Encuesta CSAT EDI Manual,ENCUESTA,REAL Manual,BORRADOR,EDI,,CSAT_ENTREGA_V1,9876543210,encuesta_wa,Hola {{1}} cuéntanos cómo fue tu última entrega con {{2}},,adjuntar-csv-aqui.csv,,,,,,,false

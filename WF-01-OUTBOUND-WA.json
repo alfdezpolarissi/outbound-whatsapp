@@ -1,0 +1,1331 @@
+{
+  "name": "WF-01-OUTBOUND-WA",
+  "nodes": [
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Webhook monday",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf-01-outbound-wa",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [200, 180],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "IF: checkbox_lock false",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [200, 420],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "id": "cond-lock",
+              "leftValue": "={{ $json.body.event.columnId }}",
+              "rightValue": "status_wa",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "cond-lock2",
+              "leftValue": "={{ $json.body.event.value?.label?.text }}",
+              "rightValue": "ENVIAR_WA",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "HTTP: SET lock=true",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 420],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$json.body.event.pulseId}\", column_id: \"checkbox_lock\", value: \"{\\\\\\\"checked\\\\\\\":\\\\\\\"true\\\\\\\"}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
+      "name": "HTTP: monday GetItem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 420],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `query { items(ids: [${$('IF: checkbox_lock false').item.json.body.event.pulseId}]) { id name column_values { id text value } assets { id public_url file_extension name } } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0006-0006-0006-000000000006",
+      "name": "Code: Extraer campos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 420],
+      "parameters": {
+        "jsCode": "const item = $input.first().json.data.items[0];\nconst cols = {};\nitem.column_values.forEach(c => { cols[c.id] = c.text; });\nconst asset = item.assets?.[0];\n\nreturn [{\n  json: {\n    monday_item_id:      item.id,\n    titulo:              item.name,\n    tipo:                (cols.tipo_comunicacion || '').toLowerCase().trim(),\n    modo_envio:          (cols.modo_envio || '').toUpperCase().trim(),\n    empresa:             (cols.text_empresa || '').toUpperCase().trim(),\n    segmento:            cols.text_segmento || '',\n    id_encuesta_maestro: cols.text_encuesta_id || '',\n    flow_id:             cols.text_flow_id || '',\n    template_name:       cols.text_template || '',\n    texto_cuerpo:        cols.long_text_cuerpo || '',\n    url_destino:         cols.text_url || '',\n    text_media_id:       cols.text_media_id || '',\n    public_url_imagen:   asset?.public_url || null,\n    asset_id:            asset?.id || null\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0007-0007-0007-000000000007",
+      "name": "Switch: tipo",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1160, 420],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "encuesta",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ENCUESTA"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "notificacion",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "NOTIFICACION"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0008-0008-0008-000000000008",
+      "name": "PG: Validar encuesta",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1400, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_encuesta, codigo_encuesta FROM maestro.encuestas_maestro WHERE codigo_encuesta = $1 AND interaccion_activa = true",
+        "additionalFields": {
+          "queryParams": "={{ [$json.id_encuesta_maestro].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0009-0009-0009-000000000009",
+      "name": "IF: ¿encuesta existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1640, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.id_encuesta }}",
+              "operator": { "type": "exists" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0010-0010-0010-000000000010",
+      "name": "HTTP: monday ERROR encuesta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 180],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$('Code: Extraer campos').item.json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ERROR\\\\\\\"}}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0011-0011-0011-000000000011",
+      "name": "PG: Versión activa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1880, 360],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT version_num FROM maestro.encuestas_versiones WHERE id_encuesta = $1 AND version_activa = true",
+        "additionalFields": {
+          "queryParams": "={{ [$('PG: Validar encuesta').item.json.id_encuesta].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0012-0012-0012-000000000012",
+      "name": "PG: Empresa phone_number_id",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2120, 360],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT phone_number_id FROM encuestas.empresas_wa WHERE codigo_empresa = $1 AND activo = true",
+        "additionalFields": {
+          "queryParams": "={{ [$('Code: Extraer campos').item.json.empresa].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0013-0013-0013-000000000013",
+      "name": "IF: ¿media_id vacío? (enc)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2360, 360],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $('Code: Extraer campos').item.json.text_media_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0014-0014-0014-000000000014",
+      "name": "HTTP: Subir imagen a Meta (enc)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2600, 280],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $('PG: Empresa phone_number_id').item.json.phone_number_id }}/media",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', type: 'image/jpeg', link: $('Code: Extraer campos').item.json.public_url_imagen }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "META_CREDENTIAL_ID",
+          "name": "Meta WA Token"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0015-0015-0015-000000000015",
+      "name": "HTTP: monday SET media_id (enc)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2840, 280],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Extraer campos').item.json.monday_item_id}\", column_id: \"text_media_id\", value: \"${$json.id}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0016-0016-0016-000000000016",
+      "name": "Code: Merge media_id (enc)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3080, 360],
+      "parameters": {
+        "jsCode": "// Unifica el media_id: viene del upload o del campo monday\nconst campos = $('Code: Extraer campos').item.json;\nconst uploadResult = $('HTTP: Subir imagen a Meta (enc)').item?.json;\nconst wa_media_id = uploadResult?.id || campos.text_media_id || '';\n\nreturn [{\n  json: {\n    ...campos,\n    wa_media_id,\n    id_encuesta_bigint: $('PG: Validar encuesta').item.json.id_encuesta,\n    version_num: $('PG: Versión activa').item.json.version_num,\n    phone_number_id: $('PG: Empresa phone_number_id').item.json.phone_number_id\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0017-0017-0017-000000000017",
+      "name": "PG: Upsert campana",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3320, 360],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO encuestas.campanas_wa\n  (codigo_encuesta, version_num, codigo_empresa, id_externo_collector,\n   titulo_campana, es_prueba, modo_envio, segmento_filtro,\n   template_name, flow_id, wa_media_id, estado)\nVALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ENVIANDO')\nON CONFLICT (id_externo_collector) DO UPDATE\n  SET estado = 'ENVIANDO', wa_media_id = EXCLUDED.wa_media_id\nRETURNING id",
+        "additionalFields": {
+          "queryParams": "={{ [\n  $json.id_encuesta_maestro,\n  $json.version_num,\n  $json.empresa,\n  $json.monday_item_id,\n  $json.titulo,\n  $json.modo_envio === 'EQUIPO',\n  $json.modo_envio,\n  $json.segmento,\n  $json.template_name,\n  $json.flow_id,\n  $json.wa_media_id\n].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0018-0018-0018-000000000018",
+      "name": "HTTP: monday ENVIANDO",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3560, 360],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$('Code: Merge media_id (enc)').item.json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIANDO\\\\\\\"}, \\\\\\\"date_envio\\\\\\\": {\\\\\\\"date\\\\\\\": \\\\\\\"${new Date().toISOString().slice(0,10)}\\\\\\\"}}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0019-0019-0019-000000000019",
+      "name": "Code: Prep contexto enc",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3800, 360],
+      "parameters": {
+        "jsCode": "// Consolida el contexto para el loop de envíos\nconst campos = $('Code: Merge media_id (enc)').item.json;\nconst id_campana = $('PG: Upsert campana').item.json.id;\n\nreturn [{\n  json: {\n    ...campos,\n    id_campana\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0020-0020-0020-000000000020",
+      "name": "Switch: empresa (enc)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [4040, 360],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.modo_envio }}", "rightValue": "EQUIPO", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "EQUIPO"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.empresa }}", "rightValue": "VEMARE", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "VEMARE"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.empresa }}", "rightValue": "TRANSCOSE", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "TRANSCOSE"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.empresa }}", "rightValue": "EDI", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "EDI"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.empresa }}", "rightValue": "PAHER", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "PAHER"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.modo_envio }}", "rightValue": "REAL_MANUAL", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "MANUAL"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0021-0021-0021-000000000021",
+      "name": "Set: Equipo hardcoded",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4280, 160],
+      "parameters": {
+        "jsCode": "// EQUIPO: teléfonos internos — MODIFICAR CON LOS REALES\nconst ctx = $('Code: Prep contexto enc').item.json;\nconst equipo = [\n  { telefono_wa: '34600000001', razon_social: 'Equipo WA 1', codigo_isi: null },\n  { telefono_wa: '34600000002', razon_social: 'Equipo WA 2', codigo_isi: null }\n];\nreturn equipo.map(c => ({ json: { ...ctx, ...c } }));"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0022-0022-0022-000000000022",
+      "name": "PG: Contactos VEMARE",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4280, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT codigo_isi_vemare AS codigo_isi, razon_social, telefono_wa\nFROM contactos.contactos\nWHERE activo = '1'\n  AND telefono_wa IS NOT NULL AND telefono_wa <> ''\n  AND distribuidor_vemare IS NOT NULL AND distribuidor_vemare <> ''\n  AND ($1 = '' OR listas_mailjet ILIKE '%' || $1 || '%')",
+        "additionalFields": {
+          "queryParams": "={{ [$json.segmento].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0023-0023-0023-000000000023",
+      "name": "PG: Contactos TRANSCOSE",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4280, 420],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT codigo_isi_transcose AS codigo_isi, razon_social, telefono_wa\nFROM contactos.contactos\nWHERE activo = '1'\n  AND telefono_wa IS NOT NULL AND telefono_wa <> ''\n  AND distribuidor_transcose IS NOT NULL AND distribuidor_transcose <> ''\n  AND ($1 = '' OR listas_mailjet ILIKE '%' || $1 || '%')",
+        "additionalFields": {
+          "queryParams": "={{ [$json.segmento].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0024-0024-0024-000000000024",
+      "name": "PG: Contactos EDI",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4280, 540],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT codigo_isi_dieseliberia AS codigo_isi, razon_social, telefono_wa\nFROM contactos.contactos\nWHERE activo = '1'\n  AND telefono_wa IS NOT NULL AND telefono_wa <> ''\n  AND distribuidor_dieseliberia IS NOT NULL AND distribuidor_dieseliberia <> ''\n  AND ($1 = '' OR listas_mailjet ILIKE '%' || $1 || '%')",
+        "additionalFields": {
+          "queryParams": "={{ [$json.segmento].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0025-0025-0025-000000000025",
+      "name": "PG: Contactos PAHER",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4280, 660],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT codigo_isi_paher AS codigo_isi, razon_social, telefono_wa\nFROM contactos.contactos\nWHERE activo = '1'\n  AND telefono_wa IS NOT NULL AND telefono_wa <> ''\n  AND distribuidor_paher IS NOT NULL AND distribuidor_paher <> ''\n  AND ($1 = '' OR listas_mailjet ILIKE '%' || $1 || '%')",
+        "additionalFields": {
+          "queryParams": "={{ [$json.segmento].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0026-0026-0026-000000000026",
+      "name": "Code: CSV Manual",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4280, 780],
+      "parameters": {
+        "jsCode": "// Modo REAL_MANUAL: descargar CSV de monday y parsear\n// El asset_id viene de 'Code: Extraer campos'\nconst ctx = $('Code: Prep contexto enc').item.json;\n\n// Aquí se usa el nodo HTTP para descargar el CSV (ver notas)\n// Por ahora retornamos el contexto para que el siguiente nodo HTTP lo descargue\nreturn [{ json: { ...ctx, _needs_csv_download: true } }];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0027-0027-0027-000000000027",
+      "name": "Code: Merge contactos + ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4540, 460],
+      "parameters": {
+        "jsCode": "// Agrega el contexto de campaña a cada contacto\n// Este nodo recibe items de cualquiera de los nodos de contactos anteriores\nconst ctx = $('Code: Prep contexto enc').item.json;\n\nreturn $input.all().map(item => ({\n  json: {\n    telefono_wa:  item.json.telefono_wa,\n    codigo_isi:   item.json.codigo_isi || null,\n    razon_social: item.json.razon_social || null,\n    id_campana:   ctx.id_campana,\n    monday_item_id: ctx.monday_item_id,\n    template_name:  ctx.template_name,\n    flow_id:        ctx.flow_id,\n    wa_media_id:    ctx.wa_media_id,\n    phone_number_id: ctx.phone_number_id,\n    texto_cuerpo:   ctx.texto_cuerpo,\n    id_encuesta_maestro: ctx.id_encuesta_maestro,\n    empresa:        ctx.empresa\n  }\n}));"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0028-0028-0028-000000000028",
+      "name": "Loop: Lotes 50",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [4780, 460],
+      "parameters": {
+        "batchSize": 50,
+        "options": {}
+      }
+    },
+    {
+      "id": "a1b2c3d4-0029-0029-0029-000000000029",
+      "name": "PG: Check idempotencia",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [5020, 380],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, estado_envio FROM encuestas.envios_wa WHERE id_campana = $1 AND telefono_wa = $2",
+        "additionalFields": {
+          "queryParams": "={{ [$json.id_campana, $json.telefono_wa].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0030-0030-0030-000000000030",
+      "name": "IF: ¿ya ENVIADO?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [5260, 380],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.estado_envio }}",
+              "rightValue": "ENVIADO",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0031-0031-0031-000000000031",
+      "name": "PG: Upsert envio",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [5500, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO encuestas.envios_wa\n  (id_campana, codigo_isi, razon_social, telefono_wa, estado_envio)\nVALUES ($1, $2, $3, $4, 'PROCESANDO')\nON CONFLICT (id_campana, telefono_wa) DO UPDATE\n  SET estado_envio = 'PROCESANDO'\nRETURNING id, wa_flow_token",
+        "additionalFields": {
+          "queryParams": "={{ [$('Code: Merge contactos + ctx').item.json.id_campana, $('Code: Merge contactos + ctx').item.json.codigo_isi, $('Code: Merge contactos + ctx').item.json.razon_social, $('Code: Merge contactos + ctx').item.json.telefono_wa].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0032-0032-0032-000000000032",
+      "name": "HTTP: POST /messages (enc)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [5740, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $('Code: Merge contactos + ctx').item.json.phone_number_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({\n  messaging_product: 'whatsapp',\n  recipient_type: 'individual',\n  to: $('Code: Merge contactos + ctx').item.json.telefono_wa,\n  type: 'template',\n  template: {\n    name: $('Code: Merge contactos + ctx').item.json.template_name,\n    language: { code: 'es' },\n    components: [\n      {\n        type: 'header',\n        parameters: [{ type: 'image', image: { id: $('Code: Merge contactos + ctx').item.json.wa_media_id } }]\n      },\n      {\n        type: 'body',\n        parameters: [\n          { type: 'text', text: $('Code: Merge contactos + ctx').item.json.razon_social || 'Cliente' },\n          { type: 'text', text: $('Code: Merge contactos + ctx').item.json.texto_cuerpo || '' }\n        ]\n      },\n      {\n        type: 'button',\n        sub_type: 'flow',\n        index: '0',\n        parameters: [{\n          type: 'action',\n          action: {\n            flow_token: $json.wa_flow_token,\n            flow_action_data: {\n              id_encuesta_maestro: $('Code: Merge contactos + ctx').item.json.id_encuesta_maestro\n            }\n          }\n        }]\n      }\n    ]\n  }\n}) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "META_CREDENTIAL_ID",
+          "name": "Meta WA Token"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0033-0033-0033-000000000033",
+      "name": "IF: ¿HTTP 200? (enc)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [5980, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.messages?.[0]?.id }}",
+              "operator": { "type": "exists" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0034-0034-0034-000000000034",
+      "name": "PG: UPDATE enviado (enc)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [6220, 220],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE encuestas.envios_wa SET estado_envio = 'ENVIADO', wa_message_id = $1, ts_envio = NOW() WHERE id = $2::uuid",
+        "additionalFields": {
+          "queryParams": "={{ [$json.messages[0].id, $('PG: Upsert envio').item.json.id].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0035-0035-0035-000000000035",
+      "name": "PG: UPDATE error envio (enc)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [6220, 400],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE encuestas.envios_wa SET estado_envio = 'ERROR_DEFINITIVO', error_msg = $1, intentos = intentos + 1 WHERE id = $2::uuid",
+        "additionalFields": {
+          "queryParams": "={{ [JSON.stringify($json.error || 'Error Meta API'), $('PG: Upsert envio').item.json.id].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0036-0036-0036-000000000036",
+      "name": "HTTP: monday num_enviados lote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [6460, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Merge contactos + ctx').item.json.monday_item_id}\", column_id: \"num_enviados\", value: \"${$('Loop: Lotes 50').context.currentRunIndex + 1}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0037-0037-0037-000000000037",
+      "name": "PG: UPDATE campana ENVIADA",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [6700, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE encuestas.campanas_wa SET estado = 'ENVIADA', fecha_inicio_envio = NOW() WHERE id = $1",
+        "additionalFields": {
+          "queryParams": "={{ [$('Code: Prep contexto enc').item.json.id_campana].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0038-0038-0038-000000000038",
+      "name": "HTTP: monday ENVIADA + unlock (enc)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [6940, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$('Code: Prep contexto enc').item.json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIADA\\\\\\\"}, \\\\\\\"checkbox_lock\\\\\\\": {\\\\\\\"checked\\\\\\\": \\\\\\\"false\\\\\\\"}}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0039-0039-0039-000000000039",
+      "name": "PG: Empresa phone_number_id (notif)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1400, 580],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT phone_number_id FROM encuestas.empresas_wa WHERE codigo_empresa = $1 AND activo = true",
+        "additionalFields": {
+          "queryParams": "={{ [$('Code: Extraer campos').item.json.empresa].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0040-0040-0040-000000000040",
+      "name": "IF: ¿media_id vacío? (notif)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1640, 580],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $('Code: Extraer campos').item.json.text_media_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0041-0041-0041-000000000041",
+      "name": "HTTP: Subir imagen a Meta (notif)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $('PG: Empresa phone_number_id (notif)').item.json.phone_number_id }}/media",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', type: 'image/jpeg', link: $('Code: Extraer campos').item.json.public_url_imagen }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "META_CREDENTIAL_ID",
+          "name": "Meta WA Token"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0042-0042-0042-000000000042",
+      "name": "HTTP: monday SET media_id (notif)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2120, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Extraer campos').item.json.monday_item_id}\", column_id: \"text_media_id\", value: \"${$json.id}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0043-0043-0043-000000000043",
+      "name": "Code: Merge ctx notif",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2360, 580],
+      "parameters": {
+        "jsCode": "const campos = $('Code: Extraer campos').item.json;\nconst uploadResult = $('HTTP: Subir imagen a Meta (notif)').item?.json;\nconst wa_media_id = uploadResult?.id || campos.text_media_id || '';\nconst phone_number_id = $('PG: Empresa phone_number_id (notif)').item.json.phone_number_id;\n\nreturn [{ json: { ...campos, wa_media_id, phone_number_id } }];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0044-0044-0044-000000000044",
+      "name": "HTTP: monday ENVIANDO (notif)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2600, 580],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "API-Version", "value": "2024-10" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIANDO\\\\\\\"}, \\\\\\\"date_envio\\\\\\\": {\\\\\\\"date\\\\\\\": \\\\\\\"${new Date().toISOString().slice(0,10)}\\\\\\\"}}\") { id } }` }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "MONDAY_CREDENTIAL_ID",
+          "name": "monday.com API"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0045-0045-0045-000000000045",
+      "name": "Switch: empresa (notif)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [2840, 580],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.modo_envio }}", "rightValue": "EQUIPO", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "EQUIPO"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.empresa }}", "rightValue": "VEMARE", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "VEMARE"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.empresa }}", "rightValue": "TRANSCOSE", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "TRANSCOSE"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.empresa }}", "rightValue": "EDI", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "EDI"
+            },
+            {
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.empresa }}", "rightValue": "PAHER", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "renameOutput": true, "outputKey": "PAHER"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0046-0046-0046-000000000046",
+      "name": "Set: Equipo hardcoded (notif)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3080, 460],
+      "parameters": {
+        "jsCode": "const ctx = $('Code: Merge ctx notif').item.json;\nconst equipo = [\n  { telefono_wa: '34600000001', razon_social: 'Equipo WA 1' },\n  { telefono_wa: '34600000002', razon_social: 'Equipo WA 2' }\n];\nreturn equipo.map(c => ({ json: { ...ctx, ...c } }));"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0047-0047-0047-000000000047",
+      "name": "PG: Contactos VEMARE (notif)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3080, 580],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT razon_social, telefono_wa FROM contactos.contactos WHERE activo = '1' AND telefono_wa IS NOT NULL AND telefono_wa <> '' AND distribuidor_vemare IS NOT NULL AND distribuidor_vemare <> '' AND ($1 = '' OR listas_mailjet ILIKE '%' || $1 || '%')",
+        "additionalFields": { "queryParams": "={{ [$json.segmento].join(',') }}" }
+      },
+      "credentials": { "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" } }
+    },
+    {
+      "id": "a1b2c3d4-0048-0048-0048-000000000048",
+      "name": "PG: Contactos TRANSCOSE (notif)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3080, 660],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT razon_social, telefono_wa FROM contactos.contactos WHERE activo = '1' AND telefono_wa IS NOT NULL AND telefono_wa <> '' AND distribuidor_transcose IS NOT NULL AND distribuidor_transcose <> '' AND ($1 = '' OR listas_mailjet ILIKE '%' || $1 || '%')",
+        "additionalFields": { "queryParams": "={{ [$json.segmento].join(',') }}" }
+      },
+      "credentials": { "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" } }
+    },
+    {
+      "id": "a1b2c3d4-0049-0049-0049-000000000049",
+      "name": "PG: Contactos EDI (notif)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3080, 740],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT razon_social, telefono_wa FROM contactos.contactos WHERE activo = '1' AND telefono_wa IS NOT NULL AND telefono_wa <> '' AND distribuidor_dieseliberia IS NOT NULL AND distribuidor_dieseliberia <> '' AND ($1 = '' OR listas_mailjet ILIKE '%' || $1 || '%')",
+        "additionalFields": { "queryParams": "={{ [$json.segmento].join(',') }}" }
+      },
+      "credentials": { "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" } }
+    },
+    {
+      "id": "a1b2c3d4-0050-0050-0050-000000000050",
+      "name": "PG: Contactos PAHER (notif)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3080, 820],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT razon_social, telefono_wa FROM contactos.contactos WHERE activo = '1' AND telefono_wa IS NOT NULL AND telefono_wa <> '' AND distribuidor_paher IS NOT NULL AND distribuidor_paher <> '' AND ($1 = '' OR listas_mailjet ILIKE '%' || $1 || '%')",
+        "additionalFields": { "queryParams": "={{ [$json.segmento].join(',') }}" }
+      },
+      "credentials": { "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" } }
+    },
+    {
+      "id": "a1b2c3d4-0051-0051-0051-000000000051",
+      "name": "Code: Merge contactos (notif)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3320, 660],
+      "parameters": {
+        "jsCode": "const ctx = $('Code: Merge ctx notif').item.json;\nreturn $input.all().map(item => ({\n  json: {\n    telefono_wa:  item.json.telefono_wa,\n    razon_social: item.json.razon_social || null,\n    monday_item_id: ctx.monday_item_id,\n    template_name:  ctx.template_name,\n    wa_media_id:    ctx.wa_media_id,\n    phone_number_id: ctx.phone_number_id,\n    texto_cuerpo:   ctx.texto_cuerpo,\n    url_destino:    ctx.url_destino\n  }\n}));"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0052-0052-0052-000000000052",
+      "name": "Loop: Lotes 50 (notif)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [3560, 660],
+      "parameters": { "batchSize": 50, "options": {} }
+    },
+    {
+      "id": "a1b2c3d4-0053-0053-0053-000000000053",
+      "name": "IF: ¿url_destino? (notif)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3800, 580],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.url_destino }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0054-0054-0054-000000000054",
+      "name": "HTTP: POST /messages CON URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4040, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $json.phone_number_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({\n  messaging_product: 'whatsapp',\n  to: $json.telefono_wa,\n  type: 'template',\n  template: {\n    name: 'notificacion_con_url',\n    language: { code: 'es' },\n    components: [\n      { type: 'header', parameters: [{ type: 'image', image: { id: $json.wa_media_id } }] },\n      { type: 'body', parameters: [\n        { type: 'text', text: $json.razon_social || 'Cliente' },\n        { type: 'text', text: $json.texto_cuerpo }\n      ]},\n      { type: 'button', sub_type: 'url', index: '0',\n        parameters: [{ type: 'text', text: $json.url_destino }]\n      }\n    ]\n  }\n}) }}"
+      },
+      "credentials": { "httpHeaderAuth": { "id": "META_CREDENTIAL_ID", "name": "Meta WA Token" } }
+    },
+    {
+      "id": "a1b2c3d4-0055-0055-0055-000000000055",
+      "name": "HTTP: POST /messages SIN URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4040, 660],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v20.0/{{ $json.phone_number_id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({\n  messaging_product: 'whatsapp',\n  to: $json.telefono_wa,\n  type: 'template',\n  template: {\n    name: 'notificacion_sin_url',\n    language: { code: 'es' },\n    components: [\n      { type: 'header', parameters: [{ type: 'image', image: { id: $json.wa_media_id } }] },\n      { type: 'body', parameters: [\n        { type: 'text', text: $json.razon_social || 'Cliente' },\n        { type: 'text', text: $json.texto_cuerpo }\n      ]}\n    ]\n  }\n}) }}"
+      },
+      "credentials": { "httpHeaderAuth": { "id": "META_CREDENTIAL_ID", "name": "Meta WA Token" } }
+    },
+    {
+      "id": "a1b2c3d4-0056-0056-0056-000000000056",
+      "name": "HTTP: monday num_enviados (notif)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4280, 580],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }, { "name": "API-Version", "value": "2024-10" }] },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Merge contactos (notif)').item.json.monday_item_id}\", column_id: \"num_enviados\", value: \"${$('Loop: Lotes 50 (notif)').context.currentRunIndex + 1}\") { id } }` }) }}"
+      },
+      "credentials": { "httpHeaderAuth": { "id": "MONDAY_CREDENTIAL_ID", "name": "monday.com API" } }
+    },
+    {
+      "id": "a1b2c3d4-0057-0057-0057-000000000057",
+      "name": "HTTP: monday ENVIADA + unlock (notif)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4520, 580],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.monday.com/v2",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }, { "name": "API-Version", "value": "2024-10" }] },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$('Code: Merge ctx notif').item.json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIADA\\\\\\\"}, \\\\\\\"checkbox_lock\\\\\\\": {\\\\\\\"checked\\\\\\\": \\\\\\\"false\\\\\\\"}}\") { id } }` }) }}"
+      },
+      "credentials": { "httpHeaderAuth": { "id": "MONDAY_CREDENTIAL_ID", "name": "monday.com API" } }
+    }
+  ],
+  "connections": {
+    "Webhook monday": {
+      "main": [
+        [{ "node": "Respond OK", "type": "main", "index": 0 }],
+        [{ "node": "IF: checkbox_lock false", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: checkbox_lock false": {
+      "main": [
+        [{ "node": "HTTP: SET lock=true", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "HTTP: SET lock=true": {
+      "main": [[{ "node": "HTTP: monday GetItem", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday GetItem": {
+      "main": [[{ "node": "Code: Extraer campos", "type": "main", "index": 0 }]]
+    },
+    "Code: Extraer campos": {
+      "main": [[{ "node": "Switch: tipo", "type": "main", "index": 0 }]]
+    },
+    "Switch: tipo": {
+      "main": [
+        [{ "node": "PG: Validar encuesta", "type": "main", "index": 0 }],
+        [{ "node": "PG: Empresa phone_number_id (notif)", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Validar encuesta": {
+      "main": [[{ "node": "IF: ¿encuesta existe?", "type": "main", "index": 0 }]]
+    },
+    "IF: ¿encuesta existe?": {
+      "main": [
+        [{ "node": "PG: Versión activa", "type": "main", "index": 0 }],
+        [{ "node": "HTTP: monday ERROR encuesta", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Versión activa": {
+      "main": [[{ "node": "PG: Empresa phone_number_id", "type": "main", "index": 0 }]]
+    },
+    "PG: Empresa phone_number_id": {
+      "main": [[{ "node": "IF: ¿media_id vacío? (enc)", "type": "main", "index": 0 }]]
+    },
+    "IF: ¿media_id vacío? (enc)": {
+      "main": [
+        [{ "node": "HTTP: Subir imagen a Meta (enc)", "type": "main", "index": 0 }],
+        [{ "node": "Code: Merge media_id (enc)", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Subir imagen a Meta (enc)": {
+      "main": [[{ "node": "HTTP: monday SET media_id (enc)", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday SET media_id (enc)": {
+      "main": [[{ "node": "Code: Merge media_id (enc)", "type": "main", "index": 0 }]]
+    },
+    "Code: Merge media_id (enc)": {
+      "main": [[{ "node": "PG: Upsert campana", "type": "main", "index": 0 }]]
+    },
+    "PG: Upsert campana": {
+      "main": [[{ "node": "HTTP: monday ENVIANDO", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday ENVIANDO": {
+      "main": [[{ "node": "Code: Prep contexto enc", "type": "main", "index": 0 }]]
+    },
+    "Code: Prep contexto enc": {
+      "main": [[{ "node": "Switch: empresa (enc)", "type": "main", "index": 0 }]]
+    },
+    "Switch: empresa (enc)": {
+      "main": [
+        [{ "node": "Set: Equipo hardcoded", "type": "main", "index": 0 }],
+        [{ "node": "PG: Contactos VEMARE", "type": "main", "index": 0 }],
+        [{ "node": "PG: Contactos TRANSCOSE", "type": "main", "index": 0 }],
+        [{ "node": "PG: Contactos EDI", "type": "main", "index": 0 }],
+        [{ "node": "PG: Contactos PAHER", "type": "main", "index": 0 }],
+        [{ "node": "Code: CSV Manual", "type": "main", "index": 0 }]
+      ]
+    },
+    "Set: Equipo hardcoded": {
+      "main": [[{ "node": "Code: Merge contactos + ctx", "type": "main", "index": 0 }]]
+    },
+    "PG: Contactos VEMARE": {
+      "main": [[{ "node": "Code: Merge contactos + ctx", "type": "main", "index": 0 }]]
+    },
+    "PG: Contactos TRANSCOSE": {
+      "main": [[{ "node": "Code: Merge contactos + ctx", "type": "main", "index": 0 }]]
+    },
+    "PG: Contactos EDI": {
+      "main": [[{ "node": "Code: Merge contactos + ctx", "type": "main", "index": 0 }]]
+    },
+    "PG: Contactos PAHER": {
+      "main": [[{ "node": "Code: Merge contactos + ctx", "type": "main", "index": 0 }]]
+    },
+    "Code: CSV Manual": {
+      "main": [[{ "node": "Code: Merge contactos + ctx", "type": "main", "index": 0 }]]
+    },
+    "Code: Merge contactos + ctx": {
+      "main": [[{ "node": "Loop: Lotes 50", "type": "main", "index": 0 }]]
+    },
+    "Loop: Lotes 50": {
+      "main": [
+        [{ "node": "PG: Check idempotencia", "type": "main", "index": 0 }],
+        [{ "node": "PG: UPDATE campana ENVIADA", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Check idempotencia": {
+      "main": [[{ "node": "IF: ¿ya ENVIADO?", "type": "main", "index": 0 }]]
+    },
+    "IF: ¿ya ENVIADO?": {
+      "main": [
+        [{ "node": "PG: Upsert envio", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "PG: Upsert envio": {
+      "main": [[{ "node": "HTTP: POST /messages (enc)", "type": "main", "index": 0 }]]
+    },
+    "HTTP: POST /messages (enc)": {
+      "main": [[{ "node": "IF: ¿HTTP 200? (enc)", "type": "main", "index": 0 }]]
+    },
+    "IF: ¿HTTP 200? (enc)": {
+      "main": [
+        [{ "node": "PG: UPDATE enviado (enc)", "type": "main", "index": 0 }],
+        [{ "node": "PG: UPDATE error envio (enc)", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: UPDATE enviado (enc)": {
+      "main": [[{ "node": "HTTP: monday num_enviados lote", "type": "main", "index": 0 }]]
+    },
+    "PG: UPDATE error envio (enc)": {
+      "main": [[{ "node": "HTTP: monday num_enviados lote", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday num_enviados lote": {
+      "main": [[{ "node": "Loop: Lotes 50", "type": "main", "index": 0 }]]
+    },
+    "PG: UPDATE campana ENVIADA": {
+      "main": [[{ "node": "HTTP: monday ENVIADA + unlock (enc)", "type": "main", "index": 0 }]]
+    },
+    "PG: Empresa phone_number_id (notif)": {
+      "main": [[{ "node": "IF: ¿media_id vacío? (notif)", "type": "main", "index": 0 }]]
+    },
+    "IF: ¿media_id vacío? (notif)": {
+      "main": [
+        [{ "node": "HTTP: Subir imagen a Meta (notif)", "type": "main", "index": 0 }],
+        [{ "node": "Code: Merge ctx notif", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Subir imagen a Meta (notif)": {
+      "main": [[{ "node": "HTTP: monday SET media_id (notif)", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday SET media_id (notif)": {
+      "main": [[{ "node": "Code: Merge ctx notif", "type": "main", "index": 0 }]]
+    },
+    "Code: Merge ctx notif": {
+      "main": [[{ "node": "HTTP: monday ENVIANDO (notif)", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday ENVIANDO (notif)": {
+      "main": [[{ "node": "Switch: empresa (notif)", "type": "main", "index": 0 }]]
+    },
+    "Switch: empresa (notif)": {
+      "main": [
+        [{ "node": "Set: Equipo hardcoded (notif)", "type": "main", "index": 0 }],
+        [{ "node": "PG: Contactos VEMARE (notif)", "type": "main", "index": 0 }],
+        [{ "node": "PG: Contactos TRANSCOSE (notif)", "type": "main", "index": 0 }],
+        [{ "node": "PG: Contactos EDI (notif)", "type": "main", "index": 0 }],
+        [{ "node": "PG: Contactos PAHER (notif)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Set: Equipo hardcoded (notif)": {
+      "main": [[{ "node": "Code: Merge contactos (notif)", "type": "main", "index": 0 }]]
+    },
+    "PG: Contactos VEMARE (notif)": {
+      "main": [[{ "node": "Code: Merge contactos (notif)", "type": "main", "index": 0 }]]
+    },
+    "PG: Contactos TRANSCOSE (notif)": {
+      "main": [[{ "node": "Code: Merge contactos (notif)", "type": "main", "index": 0 }]]
+    },
+    "PG: Contactos EDI (notif)": {
+      "main": [[{ "node": "Code: Merge contactos (notif)", "type": "main", "index": 0 }]]
+    },
+    "PG: Contactos PAHER (notif)": {
+      "main": [[{ "node": "Code: Merge contactos (notif)", "type": "main", "index": 0 }]]
+    },
+    "Code: Merge contactos (notif)": {
+      "main": [[{ "node": "Loop: Lotes 50 (notif)", "type": "main", "index": 0 }]]
+    },
+    "Loop: Lotes 50 (notif)": {
+      "main": [
+        [{ "node": "IF: ¿url_destino? (notif)", "type": "main", "index": 0 }],
+        [{ "node": "HTTP: monday ENVIADA + unlock (notif)", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: ¿url_destino? (notif)": {
+      "main": [
+        [{ "node": "HTTP: POST /messages CON URL", "type": "main", "index": 0 }],
+        [{ "node": "HTTP: POST /messages SIN URL", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: POST /messages CON URL": {
+      "main": [[{ "node": "HTTP: monday num_enviados (notif)", "type": "main", "index": 0 }]]
+    },
+    "HTTP: POST /messages SIN URL": {
+      "main": [[{ "node": "HTTP: monday num_enviados (notif)", "type": "main", "index": 0 }]]
+    },
+    "HTTP: monday num_enviados (notif)": {
+      "main": [[{ "node": "Loop: Lotes 50 (notif)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": [{ "name": "WA-OUTBOUND" }]
+}
