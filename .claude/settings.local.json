@@ -5,7 +5,14 @@
       "Bash(extract-text \"C:\\\\Users\\\\alvaro.fernandez\\\\OneDrive - grupovemare.com\\\\MARKETING COMUNICACIÓN\\\\AUTOMATIZACIONES\\\\OUTBOUND WORKFLOW WHATSAPP MARKETING\\\\plan-tecnico-comunicaciones-wa-v4.docx\")",
       "PowerShell(pandoc \"C:\\\\Users\\\\alvaro.fernandez\\\\OneDrive - grupovemare.com\\\\MARKETING COMUNICACI�N\\\\AUTOMATIZACIONES\\\\OUTBOUND WORKFLOW WHATSAPP MARKETING\\\\plan-tecnico-comunicaciones-wa-v4.docx\" -t markdown 2>&1)",
       "PowerShell(python \"C:\\\\Users\\\\alvaro.fernandez\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\b8214068-7cca-4430-9ae6-71b0b8c6a51f\\\\adfaa179-6465-4c6f-b1a6-c2db98bf66e6\\\\skills\\\\docx\\\\scripts\\\\office\\\\unpack.py\" \"C:\\\\Users\\\\alvaro.fernandez\\\\OneDrive - grupovemare.com\\\\MARKETING COMUNICACI�N\\\\AUTOMATIZACIONES\\\\OUTBOUND WORKFLOW WHATSAPP MARKETING\\\\plan-tecnico-comunicaciones-wa-v4.docx\" \"C:\\\\Temp\\\\wa-plan-unpacked\" 2>&1)",
-      "PowerShell(pip install defusedxml -q)"
+      "PowerShell(pip install defusedxml -q)",
+      "Bash(python3 -c ' *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(gh pr create --title 'feat: workflows n8n WA + sync contactos v13 + board monday' --body ' *)",
+      "PowerShell(git remote get-url origin)",
+      "PowerShell(& \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" auth status 2>&1)"
     ]
   }
 }
