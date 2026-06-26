@@ -1,0 +1,458 @@
+{
+  "name": "WF-SMK-INGEST-RESPUESTAS",
+  "nodes": [
+    {
+      "id": "smk-01",
+      "name": "Trigger: Cada 30 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 30 }]
+        }
+      }
+    },
+    {
+      "id": "smk-02",
+      "name": "Code: Init timestamp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Recupera el timestamp de la última ejecución exitosa.\n// Primera vez: procesa las últimas 25h para no perder nada.\nconst sd = $getWorkflowStaticData('global');\nconst fallback = new Date(Date.now() - 25 * 60 * 60 * 1000)\n  .toISOString().replace('T', ' ').substring(0, 19);\nconst lastPoll = sd.smk_last_poll || fallback;\nconst nowIso  = new Date().toISOString().replace('T', ' ').substring(0, 19);\nreturn [{ json: { last_poll: lastPoll, run_started_at: nowIso } }];"
+      }
+    },
+    {
+      "id": "smk-03",
+      "name": "PG: Surveys activas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [440, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id_encuesta, id_externo_encuesta->>'smk_survey_id' AS smk_survey_id FROM maestro.encuestas_maestro WHERE interaccion_activa = true AND id_externo_encuesta->>'smk_survey_id' IS NOT NULL ORDER BY id_encuesta",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" }
+      }
+    },
+    {
+      "id": "smk-04",
+      "name": "Loop: Por survey",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 300],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "smk-05",
+      "name": "HTTP: SMK Bulk responses",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.surveymonkey.com/v3/surveys/{{ $json.smk_survey_id }}/responses/bulk",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "per_page",           "value": "100" },
+            { "name": "response_status",    "value": "completed" },
+            { "name": "start_modified_at",  "value": "={{ $('Code: Init timestamp').first().json.last_poll }}" }
+          ]
+        },
+        "options": { "response": { "response": { "neverError": true } } }
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "SMK_CREDENTIAL_ID", "name": "SurveyMonkey API" }
+      }
+    },
+    {
+      "id": "smk-06",
+      "name": "Code: Parsear responses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Extrae el array de responses del bulk endpoint.\n// Propaga smk_survey_id e id_encuesta_maestro a cada item.\nconst bulk      = $input.first().json;\nconst responses = bulk.data || [];\nconst surveyCtx = $('Loop: Por survey').first().json;\n\nif (responses.length === 0) {\n  return [{ json: { has_responses: false, smk_survey_id: surveyCtx.smk_survey_id } }];\n}\n\nreturn responses.map(r => ({\n  json: {\n    has_responses:     true,\n    smk_response_id:   r.id,\n    smk_survey_id:     surveyCtx.smk_survey_id,\n    id_encuesta_ctx:   surveyCtx.id_encuesta,\n    smk_collector_id:  r.collector_id,\n    date_modified:     r.date_modified\n  }\n}));"
+      }
+    },
+    {
+      "id": "smk-07",
+      "name": "IF: Hay responses?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1320, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-01",
+              "leftValue": "={{ $json.has_responses }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "smk-08",
+      "name": "NoOp: Sin responses",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1540, 500],
+      "parameters": {}
+    },
+    {
+      "id": "smk-09",
+      "name": "Loop: Por response",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1540, 300],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "smk-10",
+      "name": "HTTP: SMK Response detail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1760, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.surveymonkey.com/v3/surveys/{{ $json.smk_survey_id }}/responses/{{ $json.smk_response_id }}/details",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "SMK_CREDENTIAL_ID", "name": "SurveyMonkey API" }
+      }
+    },
+    {
+      "id": "smk-11",
+      "name": "Code: Extraer datos response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Extrae y limpia todos los datos relevantes de la response.\n// Filtra preguntas sin respuesta (pages con questions: []).\n// Determina 'origen' a partir de collection_mode (campo disponible en details).\nconst r    = $input.first().json;\nconst cv   = r.custom_variables || {};\nconst loop = $('Loop: Por response').first().json;\n\n// Determinar origen desde collection_mode\nconst collectionModeMap = {\n  default:  'WEBLINK',\n  email:    'EMAIL',\n  offline:  'FISICO',\n  ios:      'APP',\n  android:  'APP'\n};\nconst origen = collectionModeMap[r.collection_mode] || 'WEBLINK';\n\n// Filtrar páginas con preguntas respondidas (quita páginas vacías y preguntas sin answers)\nconst pagesConRespuestas = (r.pages || []).map(page => ({\n  ...page,\n  questions: (page.questions || []).filter(q => q.answers && q.answers.length > 0)\n})).filter(page => page.questions.length > 0);\n\nreturn [{\n  json: {\n    smk_response_id:  r.id,\n    smk_survey_id:    r.survey_id,\n    smk_collector_id: r.collector_id,\n    id_encuesta_ctx:  loop.id_encuesta_ctx,\n    response_status:  r.response_status,\n    collection_mode:  r.collection_mode,\n    origen,\n    date_created:     r.date_created,\n    // Identidad del respondente (vacío si link no personalizado)\n    codigo_isi:       cv.cod   || null,\n    nombre_empresa:   cv.dis   || null,\n    email:            cv.email || null,\n    // Páginas con respuestas\n    pages: pagesConRespuestas\n  }\n}];"
+      }
+    },
+    {
+      "id": "smk-12",
+      "name": "PG: Maestro lookup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2200, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT em.id_encuesta AS id_encuesta_maestro, ev.version_num FROM maestro.encuestas_maestro em JOIN maestro.encuestas_versiones ev ON ev.id_encuesta = em.id_encuesta AND ev.version_activa = true WHERE em.id_externo_encuesta->>'smk_survey_id' = $1 AND em.interaccion_activa = true LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ $json.smk_survey_id }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" }
+      }
+    },
+    {
+      "id": "smk-13",
+      "name": "PG: Upsert ejecucion",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2420, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO encuestas.ejecuciones_encuesta (id_encuesta_maestro, canal, origen, id_externo_collector, titulo_ejecucion, es_prueba, version_num, estado) VALUES ($1, 'SURVEYMONKEY', $2, $3, $4, false, $5, 'ACTIVA') ON CONFLICT (id_externo_collector) DO UPDATE SET estado = EXCLUDED.estado RETURNING id_ejecucion, id_encuesta_maestro, version_num, origen",
+        "options": {
+          "queryReplacement": "={{ [\n  $('PG: Maestro lookup').first().json.id_encuesta_maestro,\n  $json.origen,\n  $json.smk_collector_id,\n  'SMK Collector ' + $json.smk_collector_id,\n  $('PG: Maestro lookup').first().json.version_num\n].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" }
+      }
+    },
+    {
+      "id": "smk-14",
+      "name": "Set: Consolidar contexto",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2640, 300],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            { "id": "f1", "name": "id_ejecucion",       "value": "={{ $json.id_ejecucion }}",       "type": "string" },
+            { "id": "f2", "name": "id_encuesta_maestro","value": "={{ $json.id_encuesta_maestro }}", "type": "string" },
+            { "id": "f3", "name": "version_num",        "value": "={{ $json.version_num }}",         "type": "number" },
+            { "id": "f4", "name": "origen",             "value": "={{ $json.origen }}",              "type": "string" },
+            { "id": "f5", "name": "smk_response_id",    "value": "={{ $('Code: Extraer datos response').first().json.smk_response_id }}", "type": "string" },
+            { "id": "f6", "name": "smk_collector_id",   "value": "={{ $('Code: Extraer datos response').first().json.smk_collector_id }}", "type": "string" },
+            { "id": "f7", "name": "smk_survey_id",      "value": "={{ $('Code: Extraer datos response').first().json.smk_survey_id }}",    "type": "string" },
+            { "id": "f8", "name": "codigo_isi",         "value": "={{ $('Code: Extraer datos response').first().json.codigo_isi }}",       "type": "string" },
+            { "id": "f9", "name": "nombre_empresa",     "value": "={{ $('Code: Extraer datos response').first().json.nombre_empresa }}",   "type": "string" },
+            { "id": "f10","name": "email",              "value": "={{ $('Code: Extraer datos response').first().json.email }}",            "type": "string" },
+            { "id": "f11","name": "pages",              "value": "={{ $('Code: Extraer datos response').first().json.pages }}",            "type": "array"  }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "smk-15",
+      "name": "PG: Identidad contacto",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2860, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT codigo_isi, razon_social AS nombre_empresa, email, telefono_wa FROM public.contactos WHERE codigo_isi = $1 LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ $json.codigo_isi || '' }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" }
+      }
+    },
+    {
+      "id": "smk-16",
+      "name": "PG: Upsert envio",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3080, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO encuestas.encuestas_envios (id_ejecucion, codigo_isi, nombre_empresa, email, estado_entrega, estado_envio) VALUES ($1, $2, $3, $4, 'ENTREGADO', 'ENVIADO') ON CONFLICT (id_ejecucion, codigo_isi, nombre_empresa) WHERE codigo_isi IS NOT NULL DO UPDATE SET estado_entrega = 'ENTREGADO' RETURNING id_envio",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Set: Consolidar contexto').first().json.id_ejecucion,\n  $('PG: Identidad contacto').first().json.codigo_isi || $('Set: Consolidar contexto').first().json.codigo_isi,\n  $('PG: Identidad contacto').first().json.nombre_empresa || $('Set: Consolidar contexto').first().json.nombre_empresa,\n  $('PG: Identidad contacto').first().json.email || $('Set: Consolidar contexto').first().json.email\n].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" }
+      }
+    },
+    {
+      "id": "smk-17",
+      "name": "PG: Mapa preguntas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3300, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT p.id_pregunta, p.id_metrica, p.id_externo_pregunta, p.orden, pv.peso_final_calculado FROM maestro.encuestas_versiones ev JOIN maestro.preguntas_maestro p ON p.id_encuesta = ev.id_encuesta AND p.pregunta_activa = true JOIN maestro.ponderaciones_versiones pv ON pv.id_encuesta = ev.id_encuesta AND pv.version_num = ev.version_num AND pv.id_pregunta = p.id_pregunta WHERE ev.id_encuesta = $1 AND ev.version_activa = true ORDER BY p.orden",
+        "options": {
+          "queryReplacement": "={{ $('Set: Consolidar contexto').first().json.id_encuesta_maestro }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" }
+      }
+    },
+    {
+      "id": "smk-18",
+      "name": "PG: Mapa opciones",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3520, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT o.id_pregunta, o.id_externo_opcion, o.valor_numerico, o.id_opcion FROM maestro.opciones_maestro o JOIN maestro.preguntas_maestro p ON p.id_pregunta = o.id_pregunta WHERE p.id_encuesta = $1 AND p.pregunta_activa = true",
+        "options": {
+          "queryReplacement": "={{ $('Set: Consolidar contexto').first().json.id_encuesta_maestro }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" }
+      }
+    },
+    {
+      "id": "smk-19",
+      "name": "Code: Construir respuestas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3740, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ctx       = $('Set: Consolidar contexto').first().json;\nconst idEnvio   = $('PG: Upsert envio').first().json.id_envio;\nconst preguntas = $('PG: Mapa preguntas').all().map(i => i.json);\nconst opciones  = $('PG: Mapa opciones').all().map(i => i.json);\nconst pages     = ctx.pages || [];\n\n// Maps de lookup rápido\nconst preguntasMap = new Map(preguntas.map(p => [p.id_externo_pregunta, p]));\nconst opcionesMap  = new Map(opciones.map(o => [o.id_externo_opcion, o]));\n\nconst filas = [];\n\nfor (const page of pages) {\n  for (const pregSmk of (page.questions || [])) {\n    const preg = preguntasMap.get(pregSmk.id);\n    if (!preg) continue; // Pregunta no registrada en diccionario (ej: imagen)\n\n    const esComentario = preg.id_metrica === 'COMENTARIO';\n    let valor_numerico       = null;\n    let valor_calculado      = null;\n    let respuesta_comentario = null;\n    let smk_choice_id        = null;\n\n    if (esComentario) {\n      // Pregunta de texto libre\n      respuesta_comentario = pregSmk.answers?.[0]?.text || null;\n    } else {\n      const answer = pregSmk.answers?.[0];\n      if (answer) {\n        smk_choice_id = answer.choice_id;\n\n        // Fuente primaria: weight directo en la respuesta (más rápido)\n        const w = answer.choice_metadata?.weight;\n        valor_numerico = w !== undefined ? parseFloat(w) : null;\n\n        // Fallback: lookup en opciones_maestro por choice_id\n        if (valor_numerico === null) {\n          const opc = opcionesMap.get(smk_choice_id);\n          valor_numerico = opc ? parseFloat(opc.valor_numerico) : null;\n        }\n\n        const peso = parseFloat(preg.peso_final_calculado);\n        valor_calculado = (valor_numerico !== null && peso > 0)\n          ? parseFloat((valor_numerico * peso).toFixed(6))\n          : null;\n      }\n    }\n\n    filas.push({\n      json: {\n        id_ejecucion:          ctx.id_ejecucion,\n        id_envio:              idEnvio,\n        id_encuesta_maestro:   ctx.id_encuesta_maestro,\n        version_num:           ctx.version_num,\n        id_pregunta_maestro:   preg.id_pregunta,\n        id_grupo_respuesta:    idEnvio,\n        codigo_isi:            ctx.codigo_isi,\n        nombre_empresa:        ctx.nombre_empresa,\n        canal:                 'SURVEYMONKEY',\n        origen:                ctx.origen,\n        id_metrica:            preg.id_metrica,\n        peso_final_calculado:  preg.peso_final_calculado,\n        valor_numerico,\n        valor_calculado,\n        respuesta_comentario,\n        atributos_adicionales: JSON.stringify({\n          smk_response_id:  ctx.smk_response_id,\n          smk_question_id:  pregSmk.id,\n          smk_choice_id,\n          smk_collector_id: ctx.smk_collector_id\n        })\n      }\n    });\n  }\n}\n\n// Si no hay filas (respuesta solo con comentarios vacíos), devolver señal\nreturn filas.length > 0\n  ? filas\n  : [{ json: { _sin_filas: true } }];"
+      }
+    },
+    {
+      "id": "smk-20",
+      "name": "IF: Hay filas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3960, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-02",
+              "leftValue": "={{ $json._sin_filas }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "smk-21",
+      "name": "NoOp: Sin filas",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [4180, 500],
+      "parameters": {}
+    },
+    {
+      "id": "smk-22",
+      "name": "Loop: Por pregunta",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [4180, 300],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "smk-23",
+      "name": "PG: Insert respuesta",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [4400, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO encuestas.respuestas (id_ejecucion, id_envio, id_encuesta_maestro, version_num, id_pregunta_maestro, id_grupo_respuesta, codigo_isi, nombre_empresa, canal, origen, id_metrica, peso_final_calculado, valor_numerico, valor_calculado, respuesta_comentario, atributos_adicionales) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb) ON CONFLICT (id_grupo_respuesta, id_pregunta_maestro) DO NOTHING",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.id_ejecucion,\n  $json.id_envio,\n  $json.id_encuesta_maestro,\n  $json.version_num,\n  $json.id_pregunta_maestro,\n  $json.id_grupo_respuesta,\n  $json.codigo_isi,\n  $json.nombre_empresa,\n  $json.canal,\n  $json.origen,\n  $json.id_metrica,\n  $json.peso_final_calculado,\n  $json.valor_numerico,\n  $json.valor_calculado,\n  $json.respuesta_comentario,\n  $json.atributos_adicionales\n].join(',') }}"
+        }
+      },
+      "credentials": {
+        "postgres": { "id": "PG_CREDENTIAL_ID", "name": "PostgreSQL Vemare" }
+      }
+    },
+    {
+      "id": "smk-24",
+      "name": "Code: Update timestamp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4620, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Persiste el timestamp de esta ejecución para el próximo polling.\nconst sd = $getWorkflowStaticData('global');\nsd.smk_last_poll = $('Code: Init timestamp').first().json.run_started_at;\nreturn [{ json: { updated_last_poll: sd.smk_last_poll } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Trigger: Cada 30 min": {
+      "main": [[{ "node": "Code: Init timestamp", "type": "main", "index": 0 }]]
+    },
+    "Code: Init timestamp": {
+      "main": [[{ "node": "PG: Surveys activas", "type": "main", "index": 0 }]]
+    },
+    "PG: Surveys activas": {
+      "main": [[{ "node": "Loop: Por survey", "type": "main", "index": 0 }]]
+    },
+    "Loop: Por survey": {
+      "main": [
+        [{ "node": "HTTP: SMK Bulk responses", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "HTTP: SMK Bulk responses": {
+      "main": [[{ "node": "Code: Parsear responses", "type": "main", "index": 0 }]]
+    },
+    "Code: Parsear responses": {
+      "main": [[{ "node": "IF: Hay responses?", "type": "main", "index": 0 }]]
+    },
+    "IF: Hay responses?": {
+      "main": [
+        [{ "node": "Loop: Por response", "type": "main", "index": 0 }],
+        [{ "node": "NoOp: Sin responses", "type": "main", "index": 0 }]
+      ]
+    },
+    "Loop: Por response": {
+      "main": [
+        [{ "node": "HTTP: SMK Response detail", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "HTTP: SMK Response detail": {
+      "main": [[{ "node": "Code: Extraer datos response", "type": "main", "index": 0 }]]
+    },
+    "Code: Extraer datos response": {
+      "main": [[{ "node": "PG: Maestro lookup", "type": "main", "index": 0 }]]
+    },
+    "PG: Maestro lookup": {
+      "main": [[{ "node": "PG: Upsert ejecucion", "type": "main", "index": 0 }]]
+    },
+    "PG: Upsert ejecucion": {
+      "main": [[{ "node": "Set: Consolidar contexto", "type": "main", "index": 0 }]]
+    },
+    "Set: Consolidar contexto": {
+      "main": [[{ "node": "PG: Identidad contacto", "type": "main", "index": 0 }]]
+    },
+    "PG: Identidad contacto": {
+      "main": [[{ "node": "PG: Upsert envio", "type": "main", "index": 0 }]]
+    },
+    "PG: Upsert envio": {
+      "main": [[{ "node": "PG: Mapa preguntas", "type": "main", "index": 0 }]]
+    },
+    "PG: Mapa preguntas": {
+      "main": [[{ "node": "PG: Mapa opciones", "type": "main", "index": 0 }]]
+    },
+    "PG: Mapa opciones": {
+      "main": [[{ "node": "Code: Construir respuestas", "type": "main", "index": 0 }]]
+    },
+    "Code: Construir respuestas": {
+      "main": [[{ "node": "IF: Hay filas?", "type": "main", "index": 0 }]]
+    },
+    "IF: Hay filas?": {
+      "main": [
+        [{ "node": "Loop: Por pregunta", "type": "main", "index": 0 }],
+        [{ "node": "NoOp: Sin filas",    "type": "main", "index": 0 }]
+      ]
+    },
+    "Loop: Por pregunta": {
+      "main": [
+        [{ "node": "PG: Insert respuesta",    "type": "main", "index": 0 }],
+        [{ "node": "Code: Update timestamp",  "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: Insert respuesta": {
+      "main": [[{ "node": "Loop: Por pregunta", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "meta": { "templateCredsSetupCompleted": false },
+  "pinData": {},
+  "versionId": "",
+  "tags": [{ "name": "encuestas" }, { "name": "surveymonkey" }]
+}
