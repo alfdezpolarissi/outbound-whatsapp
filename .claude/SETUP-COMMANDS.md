@@ -25,6 +25,13 @@ Reconstruye el contexto de la última sesión leyendo los archivos `.jsonl` de t
 
 **Requisito**: los `.jsonl` están en local (`~/.claude/projects/`), no en el repo. El comando funciona en cualquier máquina donde hayas tenido sesiones previas de este proyecto.
 
+## Comandos globales (todos los proyectos)
+
+Misma mecánica pero en `C:\Users\alvaro\.claude\commands\`. Ya configurados:
+- `/recall` — global, funciona en cualquier proyecto
+
+Copiar a `~/.claude/commands/` en cada máquina nueva (no viajan por git).
+
 ## Añadir un comando nuevo
 
 1. Crear `<nombre>.md` en `.claude/commands/`
