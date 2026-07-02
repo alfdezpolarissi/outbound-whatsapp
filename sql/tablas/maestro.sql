@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS maestro.encuestas_maestro
     codigo_encuesta character varying(100) COLLATE pg_catalog."default" NOT NULL,
     id_fase_experiencia bigint NOT NULL,
     interaccion_activa boolean NOT NULL DEFAULT true,
-    id_externo_encuesta character varying(255) COLLATE pg_catalog."default",
+    id_externo_encuesta jsonb,                          -- {"smk_survey_id": "yyy"} — solo TI, WA usa encuestas.encuestas_wa_config
     created_at timestamp without time zone NOT NULL DEFAULT now(),
     updated_at timestamp without time zone NOT NULL DEFAULT now(),
     CONSTRAINT encuestas_maestro_pkey PRIMARY KEY (id_encuesta),

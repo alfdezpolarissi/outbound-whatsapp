@@ -38,7 +38,7 @@
             {
               "id": "cond-lock",
               "leftValue": "={{ $json.body.event.columnId }}",
-              "rightValue": "status_wa",
+              "rightValue": "color_mm4p7mve",
               "operator": { "type": "string", "operation": "equals" }
             },
             {
@@ -54,28 +54,42 @@
     },
     {
       "id": "a1b2c3d4-0004-0004-0004-000000000004",
-      "name": "HTTP: SET lock=true",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "name": "PG: Check estado activo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [440, 420],
       "parameters": {
-        "method": "POST",
-        "url": "https://api.monday.com/v2",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "Content-Type", "value": "application/json" },
-            { "name": "API-Version", "value": "2024-10" }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$json.body.event.pulseId}\", column_id: \"checkbox_lock\", value: \"{\\\\\\\"checked\\\\\\\":\\\\\\\"true\\\\\\\"}\") { id } }` }) }}"
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE((SELECT estado FROM encuestas.campanas_wa WHERE id_externo_collector = $1), 'NINGUNO') AS estado",
+        "additionalFields": {
+          "queryParams": "={{ [$json.body.event.pulseId].join(',') }}"
+        }
       },
       "credentials": {
-        "httpHeaderAuth": {
-          "id": "MONDAY_CREDENTIAL_ID",
-          "name": "monday.com API"
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0004-0004-0004-000000000901",
+      "name": "IF: ya en proceso",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [560, 420],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-en-proceso",
+              "leftValue": "={{ $json.estado }}",
+              "rightValue": "ENVIANDO",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
         }
       }
     },
@@ -113,7 +127,7 @@
       "typeVersion": 2,
       "position": [920, 420],
       "parameters": {
-        "jsCode": "const item = $input.first().json.data.items[0];\nconst cols = {};\nitem.column_values.forEach(c => { cols[c.id] = c.text; });\nconst asset = item.assets?.[0];\n\nreturn [{\n  json: {\n    monday_item_id:      item.id,\n    titulo:              item.name,\n    tipo:                (cols.tipo_comunicacion || '').toLowerCase().trim(),\n    modo_envio:          (cols.modo_envio || '').toUpperCase().trim(),\n    empresa:             (cols.text_empresa || '').toUpperCase().trim(),\n    segmento:            cols.text_segmento || '',\n    id_encuesta_maestro: cols.text_encuesta_id || '',\n    flow_id:             cols.text_flow_id || '',\n    template_name:       cols.text_template || '',\n    texto_cuerpo:        cols.long_text_cuerpo || '',\n    url_destino:         cols.text_url || '',\n    text_media_id:       cols.text_media_id || '',\n    public_url_imagen:   asset?.public_url || null,\n    asset_id:            asset?.id || null\n  }\n}];"
+        "jsCode": "const item = $input.first().json.data.items[0];\nconst cols = {};\nitem.column_values.forEach(c => { cols[c.id] = c.text; });\nconst assets = item.assets || [];\n\nfunction fileAssetFor(columnId) {\n  const raw = item.column_values.find(c => c.id === columnId)?.value;\n  if (!raw) return null;\n  const fileRef = JSON.parse(raw).files?.[0];\n  if (!fileRef) return null;\n  return assets.find(a => String(a.id) === String(fileRef.assetId)) || null;\n}\n\nconst imagenAsset = fileAssetFor('file_mm4wzcfq');\nconst csvAsset = fileAssetFor('file_mm4wbyzk');\n\nreturn [{\n  json: {\n    monday_item_id:      item.id,\n    titulo:              item.name,\n    tipo:                (cols.color_mm4p82jm || '').toLowerCase().trim(),\n    modo_envio:          (cols.color_mm4p5bh9 || '').toUpperCase().trim(),\n    empresa:             (cols.color_mm4wm42p || '').toUpperCase().trim(),\n    segmento:            cols.text_mm4peyyh || '',\n    id_encuesta_maestro: cols.dropdown_mm4watxj || '',\n    flow_id:             cols.text_mm4p4ddq || '',\n    template_name:       cols.text_mm4pzjjq || '',\n    texto_cuerpo:        cols.text_mm4pjzbg || '',\n    url_destino:         cols.text_mm4p121d || '',\n    text_media_id:       cols.text_mm4p31k || '',\n    es_prueba:           (cols.color_mm4petnb || '').toUpperCase().trim() === 'SI',\n    public_url_imagen:   imagenAsset?.public_url || null,\n    asset_id_imagen:     imagenAsset?.id || null,\n    public_url_csv:      csvAsset?.public_url || null,\n    asset_id_csv:        csvAsset?.id || null\n  }\n}];"
       }
     },
     {
@@ -167,7 +181,7 @@
       "position": [1400, 300],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id_encuesta, codigo_encuesta FROM maestro.encuestas_maestro WHERE codigo_encuesta = $1 AND interaccion_activa = true",
+        "query": "SELECT em.id_encuesta, em.codigo_encuesta, cfg.flow_id, cfg.template_name, cfg.wa_media_id_cache FROM maestro.encuestas_maestro em LEFT JOIN encuestas.encuestas_wa_config cfg ON cfg.codigo_encuesta = em.codigo_encuesta WHERE em.codigo_encuesta = $1 AND em.interaccion_activa = true",
         "additionalFields": {
           "queryParams": "={{ [$json.id_encuesta_maestro].join(',') }}"
         }
@@ -215,7 +229,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$('Code: Extraer campos').item.json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ERROR\\\\\\\"}}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: 18419499542, item_id: \"${$('Code: Extraer campos').item.json.monday_item_id}\", column_values: \"{\\\\\\\"color_mm4p7mve\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ERROR\\\\\\\"}}\") { id } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -274,7 +288,7 @@
         "conditions": {
           "conditions": [
             {
-              "leftValue": "={{ $('Code: Extraer campos').item.json.text_media_id }}",
+              "leftValue": "={{ $('PG: Validar encuesta').item.json.wa_media_id_cache }}",
               "rightValue": "",
               "operator": { "type": "string", "operation": "equals" }
             }
@@ -311,28 +325,21 @@
     },
     {
       "id": "a1b2c3d4-0015-0015-0015-000000000015",
-      "name": "HTTP: monday SET media_id (enc)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "name": "PG: UPDATE media_id cache (enc)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
       "position": [2840, 280],
       "parameters": {
-        "method": "POST",
-        "url": "https://api.monday.com/v2",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "Content-Type", "value": "application/json" },
-            { "name": "API-Version", "value": "2024-10" }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Extraer campos').item.json.monday_item_id}\", column_id: \"text_media_id\", value: \"${$json.id}\") { id } }` }) }}"
+        "operation": "executeQuery",
+        "query": "INSERT INTO encuestas.encuestas_wa_config (codigo_encuesta, wa_media_id_cache) VALUES ($2, $1) ON CONFLICT (codigo_encuesta) DO UPDATE SET wa_media_id_cache = EXCLUDED.wa_media_id_cache, updated_at = NOW()",
+        "additionalFields": {
+          "queryParams": "={{ [$json.id, $('PG: Validar encuesta').item.json.codigo_encuesta].join(',') }}"
+        }
       },
       "credentials": {
-        "httpHeaderAuth": {
-          "id": "MONDAY_CREDENTIAL_ID",
-          "name": "monday.com API"
+        "postgres": {
+          "id": "PG_CREDENTIAL_ID",
+          "name": "PostgreSQL Vemare"
         }
       }
     },
@@ -343,7 +350,7 @@
       "typeVersion": 2,
       "position": [3080, 360],
       "parameters": {
-        "jsCode": "// Unifica el media_id: viene del upload o del campo monday\nconst campos = $('Code: Extraer campos').item.json;\nconst uploadResult = $('HTTP: Subir imagen a Meta (enc)').item?.json;\nconst wa_media_id = uploadResult?.id || campos.text_media_id || '';\n\nreturn [{\n  json: {\n    ...campos,\n    wa_media_id,\n    id_encuesta_bigint: $('PG: Validar encuesta').item.json.id_encuesta,\n    version_num: $('PG: Versión activa').item.json.version_num,\n    phone_number_id: $('PG: Empresa phone_number_id').item.json.phone_number_id\n  }\n}];"
+        "jsCode": "// Unifica el media_id: viene del upload o del cache en maestro.encuestas_maestro\n// flow_id y template_name vienen del maestro (por encuesta), no de monday (por campaña)\nconst campos = $('Code: Extraer campos').item.json;\nconst encuesta = $('PG: Validar encuesta').item.json;\nconst uploadResult = $('HTTP: Subir imagen a Meta (enc)').item?.json;\nconst wa_media_id = uploadResult?.id || encuesta.wa_media_id_cache || '';\n\nreturn [{\n  json: {\n    ...campos,\n    wa_media_id,\n    flow_id: encuesta.flow_id,\n    template_name: encuesta.template_name,\n    id_encuesta_bigint: encuesta.id_encuesta,\n    version_num: $('PG: Versión activa').item.json.version_num,\n    phone_number_id: $('PG: Empresa phone_number_id').item.json.phone_number_id\n  }\n}];"
       }
     },
     {
@@ -356,7 +363,7 @@
         "operation": "executeQuery",
         "query": "INSERT INTO encuestas.campanas_wa\n  (codigo_encuesta, version_num, codigo_empresa, id_externo_collector,\n   titulo_campana, es_prueba, modo_envio, segmento_filtro,\n   template_name, flow_id, wa_media_id, estado)\nVALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ENVIANDO')\nON CONFLICT (id_externo_collector) DO UPDATE\n  SET estado = 'ENVIANDO', wa_media_id = EXCLUDED.wa_media_id\nRETURNING id",
         "additionalFields": {
-          "queryParams": "={{ [\n  $json.id_encuesta_maestro,\n  $json.version_num,\n  $json.empresa,\n  $json.monday_item_id,\n  $json.titulo,\n  $json.modo_envio === 'EQUIPO',\n  $json.modo_envio,\n  $json.segmento,\n  $json.template_name,\n  $json.flow_id,\n  $json.wa_media_id\n].join(',') }}"
+          "queryParams": "={{ [\n  $json.id_encuesta_maestro,\n  $json.version_num,\n  $json.empresa,\n  $json.monday_item_id,\n  $json.titulo,\n  $json.es_prueba,\n  $json.modo_envio,\n  $json.segmento,\n  $json.template_name,\n  $json.flow_id,\n  $json.wa_media_id\n].join(',') }}"
         }
       },
       "credentials": {
@@ -384,7 +391,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$('Code: Merge media_id (enc)').item.json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIANDO\\\\\\\"}, \\\\\\\"date_envio\\\\\\\": {\\\\\\\"date\\\\\\\": \\\\\\\"${new Date().toISOString().slice(0,10)}\\\\\\\"}}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: 18419499542, item_id: \"${$('Code: Merge media_id (enc)').item.json.monday_item_id}\", column_values: \"{\\\\\\\"color_mm4p7mve\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIANDO\\\\\\\"}, \\\\\\\"date_mm4p3am8\\\\\\\": {\\\\\\\"date\\\\\\\": \\\\\\\"${new Date().toISOString().slice(0,10)}\\\\\\\"}}\") { id } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -434,7 +441,7 @@
               "renameOutput": true, "outputKey": "PAHER"
             },
             {
-              "conditions": { "conditions": [{ "leftValue": "={{ $json.modo_envio }}", "rightValue": "REAL_MANUAL", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
+              "conditions": { "conditions": [{ "leftValue": "={{ $json.modo_envio }}", "rightValue": "MANUAL", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" },
               "renameOutput": true, "outputKey": "MANUAL"
             }
           ]
@@ -724,7 +731,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Merge contactos + ctx').item.json.monday_item_id}\", column_id: \"num_enviados\", value: \"${$('Loop: Lotes 50').context.currentRunIndex + 1}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: 18419499542, item_id: \"${$('Code: Merge contactos + ctx').item.json.monday_item_id}\", column_id: \"numeric_mm4ptj7f\", value: \"${$('Loop: Lotes 50').context.currentRunIndex + 1}\") { id } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -771,7 +778,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$('Code: Prep contexto enc').item.json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIADA\\\\\\\"}, \\\\\\\"checkbox_lock\\\\\\\": {\\\\\\\"checked\\\\\\\": \\\\\\\"false\\\\\\\"}}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: 18419499542, item_id: \"${$('Code: Prep contexto enc').item.json.monday_item_id}\", column_values: \"{\\\\\\\"color_mm4p7mve\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIADO\\\\\\\"}}\") { id } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -863,7 +870,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Extraer campos').item.json.monday_item_id}\", column_id: \"text_media_id\", value: \"${$json.id}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: 18419499542, item_id: \"${$('Code: Extraer campos').item.json.monday_item_id}\", column_id: \"text_mm4p31k\", value: \"${$json.id}\") { id } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -900,7 +907,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIANDO\\\\\\\"}, \\\\\\\"date_envio\\\\\\\": {\\\\\\\"date\\\\\\\": \\\\\\\"${new Date().toISOString().slice(0,10)}\\\\\\\"}}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: 18419499542, item_id: \"${$json.monday_item_id}\", column_values: \"{\\\\\\\"color_mm4p7mve\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIANDO\\\\\\\"}, \\\\\\\"date_mm4p3am8\\\\\\\": {\\\\\\\"date\\\\\\\": \\\\\\\"${new Date().toISOString().slice(0,10)}\\\\\\\"}}\") { id } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -1090,7 +1097,7 @@
         "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }, { "name": "API-Version", "value": "2024-10" }] },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Merge contactos (notif)').item.json.monday_item_id}\", column_id: \"num_enviados\", value: \"${$('Loop: Lotes 50 (notif)').context.currentRunIndex + 1}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: 18419499542, item_id: \"${$('Code: Merge contactos (notif)').item.json.monday_item_id}\", column_id: \"numeric_mm4ptj7f\", value: \"${$('Loop: Lotes 50 (notif)').context.currentRunIndex + 1}\") { id } }` }) }}"
       },
       "credentials": { "httpHeaderAuth": { "id": "MONDAY_CREDENTIAL_ID", "name": "monday.com API" } }
     },
@@ -1107,7 +1114,7 @@
         "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }, { "name": "API-Version", "value": "2024-10" }] },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$('Code: Merge ctx notif').item.json.monday_item_id}\", column_values: \"{\\\\\\\"status_wa\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIADA\\\\\\\"}, \\\\\\\"checkbox_lock\\\\\\\": {\\\\\\\"checked\\\\\\\": \\\\\\\"false\\\\\\\"}}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: 18419499542, item_id: \"${$('Code: Merge ctx notif').item.json.monday_item_id}\", column_values: \"{\\\\\\\"color_mm4p7mve\\\\\\\": {\\\\\\\"label\\\\\\\": \\\\\\\"ENVIADO\\\\\\\"}}\") { id } }` }) }}"
       },
       "credentials": { "httpHeaderAuth": { "id": "MONDAY_CREDENTIAL_ID", "name": "monday.com API" } }
     }
@@ -1121,12 +1128,18 @@
     },
     "IF: checkbox_lock false": {
       "main": [
-        [{ "node": "HTTP: SET lock=true", "type": "main", "index": 0 }],
+        [{ "node": "PG: Check estado activo", "type": "main", "index": 0 }],
         []
       ]
     },
-    "HTTP: SET lock=true": {
-      "main": [[{ "node": "HTTP: monday GetItem", "type": "main", "index": 0 }]]
+    "PG: Check estado activo": {
+      "main": [[{ "node": "IF: ya en proceso", "type": "main", "index": 0 }]]
+    },
+    "IF: ya en proceso": {
+      "main": [
+        [],
+        [{ "node": "HTTP: monday GetItem", "type": "main", "index": 0 }]
+      ]
     },
     "HTTP: monday GetItem": {
       "main": [[{ "node": "Code: Extraer campos", "type": "main", "index": 0 }]]
@@ -1162,9 +1175,9 @@
       ]
     },
     "HTTP: Subir imagen a Meta (enc)": {
-      "main": [[{ "node": "HTTP: monday SET media_id (enc)", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "PG: UPDATE media_id cache (enc)", "type": "main", "index": 0 }]]
     },
-    "HTTP: monday SET media_id (enc)": {
+    "PG: UPDATE media_id cache (enc)": {
       "main": [[{ "node": "Code: Merge media_id (enc)", "type": "main", "index": 0 }]]
     },
     "Code: Merge media_id (enc)": {

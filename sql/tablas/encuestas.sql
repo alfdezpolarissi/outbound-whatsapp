@@ -3,6 +3,19 @@
 BEGIN;
 
 
+CREATE TABLE IF NOT EXISTS encuestas.encuestas_wa_config
+(
+    id serial NOT NULL,
+    codigo_encuesta text COLLATE pg_catalog."default" NOT NULL,   -- = maestro.encuestas_maestro.codigo_encuesta, sin FK (propiedad de TI)
+    flow_id text COLLATE pg_catalog."default",
+    template_name text COLLATE pg_catalog."default",
+    wa_media_id_cache text COLLATE pg_catalog."default",
+    created_at timestamp without time zone NOT NULL DEFAULT now(),
+    updated_at timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT encuestas_wa_config_pkey PRIMARY KEY (id),
+    CONSTRAINT encuestas_wa_config_codigo_encuesta_key UNIQUE (codigo_encuesta)
+);
+
 CREATE TABLE IF NOT EXISTS encuestas.campanas_wa
 (
     id serial NOT NULL,

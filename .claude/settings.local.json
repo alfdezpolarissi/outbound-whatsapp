@@ -12,7 +12,10 @@
       "Bash(git push *)",
       "Bash(gh pr create --title 'feat: workflows n8n WA + sync contactos v13 + board monday' --body ' *)",
       "PowerShell(git remote get-url origin)",
-      "PowerShell(& \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" auth status 2>&1)"
+      "PowerShell(& \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" auth status 2>&1)",
+      "mcp__n8n-mcp__search_workflows",
+      "mcp__n8n-mcp__get_workflow_details",
+      "mcp__n8n-mcp__search_executions"
     ]
   }
 }

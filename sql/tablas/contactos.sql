@@ -3,7 +3,7 @@
 BEGIN;
 
 
-CREATE TABLE IF NOT EXISTS public.contactos
+CREATE TABLE IF NOT EXISTS contactos.contactos
 (
     id_mailjet bigint NOT NULL,
     email text COLLATE pg_catalog."default",
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS public.contactos
     telefono_2_tipo text COLLATE pg_catalog."default",
     telefono_wa text COLLATE pg_catalog."default",
     listas_mailjet text COLLATE pg_catalog."default",
+    segmentos_mailjet text COLLATE pg_catalog."default",
     last_sync timestamp with time zone,
     distribuidor_vemare text COLLATE pg_catalog."default" DEFAULT ''::text,
     distribuidor_transcose text COLLATE pg_catalog."default" DEFAULT ''::text,
@@ -50,70 +51,27 @@ CREATE TABLE IF NOT EXISTS public.contactos
     CONSTRAINT contactos_pkey PRIMARY KEY (id_mailjet)
 );
 
-CREATE TABLE IF NOT EXISTS public.leads
+CREATE TABLE IF NOT EXISTS contactos.mailjet_listas
 (
-    id_lead bigserial NOT NULL,
-    id_mailjet bigint,
-    nombre text COLLATE pg_catalog."default",
-    razon_social text COLLATE pg_catalog."default",
-    cif text COLLATE pg_catalog."default",
-    email text COLLATE pg_catalog."default",
-    telefono text COLLATE pg_catalog."default",
-    area_interes text COLLATE pg_catalog."default",
-    motivo text COLLATE pg_catalog."default",
-    created_at timestamp with time zone DEFAULT now(),
-    fecha_ultimo_contacto timestamp with time zone,
-    provincia text COLLATE pg_catalog."default",
-    zona character varying(100) COLLATE pg_catalog."default",
-    puesto character varying(100) COLLATE pg_catalog."default",
-    cv_media_id character varying(255) COLLATE pg_catalog."default",
-    cv_filename character varying(255) COLLATE pg_catalog."default",
-    CONSTRAINT leads_pkey PRIMARY KEY (id_lead)
+    id_lista bigserial NOT NULL,
+    id_externo_mailjet bigint NOT NULL,
+    nombre character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    activo boolean NOT NULL DEFAULT true,
+    created_at timestamp without time zone NOT NULL DEFAULT now(),
+    updated_at timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT mailjet_listas_pkey PRIMARY KEY (id_lista),
+    CONSTRAINT mailjet_listas_id_externo_key UNIQUE (id_externo_mailjet)
 );
 
-CREATE TABLE IF NOT EXISTS public.sesiones
+CREATE TABLE IF NOT EXISTS contactos.mailjet_segmentos
 (
-    id_sesion bigserial NOT NULL,
-    telefono text COLLATE pg_catalog."default" NOT NULL,
-    estado text COLLATE pg_catalog."default",
-    last_interaction_time bigint,
-    expires_at bigint,
-    created_at timestamp with time zone DEFAULT now(),
-    waiting_for text COLLATE pg_catalog."default",
-    id_mailjet bigint,
-    area_interes text COLLATE pg_catalog."default",
-    email_interno character varying(255) COLLATE pg_catalog."default",
-    CONSTRAINT sesiones_pkey PRIMARY KEY (id_sesion)
+    id_segmento bigserial NOT NULL,
+    id_externo_mailjet bigint NOT NULL,
+    nombre character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    activo boolean NOT NULL DEFAULT true,
+    created_at timestamp without time zone NOT NULL DEFAULT now(),
+    updated_at timestamp without time zone NOT NULL DEFAULT now(),
+    CONSTRAINT mailjet_segmentos_pkey PRIMARY KEY (id_segmento),
+    CONSTRAINT mailjet_segmentos_id_externo_key UNIQUE (id_externo_mailjet)
 );
-
-CREATE TABLE IF NOT EXISTS public.telefonos
-(
-    id_telefono bigserial NOT NULL,
-    id_mailjet bigint,
-    telefono text COLLATE pg_catalog."default" NOT NULL,
-    tipo text COLLATE pg_catalog."default",
-    created_at timestamp with time zone DEFAULT now(),
-    CONSTRAINT telefonos_pkey PRIMARY KEY (id_telefono)
-);
-
-ALTER TABLE IF EXISTS public.leads
-    ADD CONSTRAINT leads_id_mailjet_fkey FOREIGN KEY (id_mailjet)
-    REFERENCES public.contactos (id_mailjet) MATCH SIMPLE
-    ON UPDATE NO ACTION
-    ON DELETE SET NULL;
-
-
-ALTER TABLE IF EXISTS public.sesiones
-    ADD CONSTRAINT sesiones_id_mailjet_fkey FOREIGN KEY (id_mailjet)
-    REFERENCES public.contactos (id_mailjet) MATCH SIMPLE
-    ON UPDATE NO ACTION
-    ON DELETE SET NULL;
-
-
-ALTER TABLE IF EXISTS public.telefonos
-    ADD CONSTRAINT telefonos_id_mailjet_fkey FOREIGN KEY (id_mailjet)
-    REFERENCES public.contactos (id_mailjet) MATCH SIMPLE
-    ON UPDATE NO ACTION
-    ON DELETE CASCADE;
-
 END;

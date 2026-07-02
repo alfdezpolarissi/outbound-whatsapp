@@ -235,7 +235,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation {\n  monday_increment_column: change_column_value(\n    board_id: BOARD_ID,\n    item_id: \"${$('PG: Lookup por wa_flow_token').item.json.id_externo_collector}\",\n    column_id: \"num_respondidos\",\n    value: \"1\"\n  ) { id }\n}` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation {\n  monday_increment_column: change_column_value(\n    board_id: 18419499542,\n    item_id: \"${$('PG: Lookup por wa_flow_token').item.json.id_externo_collector}\",\n    column_id: \"numeric_mm4pjtxd\",\n    value: \"1\"\n  ) { id }\n}` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {

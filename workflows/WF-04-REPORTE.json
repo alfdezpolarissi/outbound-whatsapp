@@ -31,7 +31,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `query { boards(ids: [BOARD_ID]) { items_page(limit: 100, query_params: { rules: [{ column_id: \"status_wa\", compare_value: [\"ENVIADA\",\"ENVIANDO\"], operator: any_of }] }) { items { id name column_values { id text } } } } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `query { boards(ids: [18419499542]) { items_page(limit: 100, query_params: { rules: [{ column_id: \"color_mm4p7mve\", compare_value: [\"ENVIADO\",\"ENVIANDO\"], operator: any_of }] }) { items { id name column_values { id text } } } } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -47,7 +47,7 @@
       "typeVersion": 2,
       "position": [480, 300],
       "parameters": {
-        "jsCode": "const items = $json.data?.boards?.[0]?.items_page?.items || [];\nreturn items.map(item => {\n  const cols = {};\n  item.column_values.forEach(c => { cols[c.id] = c.text; });\n  return {\n    json: {\n      monday_item_id: item.id,\n      titulo: item.name,\n      tipo: (cols.tipo_comunicacion || '').toLowerCase(),\n      fecha_envio: cols.date_envio\n    }\n  };\n});"
+        "jsCode": "const items = $json.data?.boards?.[0]?.items_page?.items || [];\nreturn items.map(item => {\n  const cols = {};\n  item.column_values.forEach(c => { cols[c.id] = c.text; });\n  return {\n    json: {\n      monday_item_id: item.id,\n      titulo: item.name,\n      tipo: (cols.color_mm4p82jm || '').toLowerCase(),\n      fecha_envio: cols.date_mm4p3am8\n    }\n  };\n});"
       }
     },
     {
@@ -147,7 +147,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: BOARD_ID, item_id: \"${$json.monday_item_id}\", column_values: \"{\\\\\\\"num_enviados\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_enviados}}, \\\\\\\"num_delivered\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_delivered}}, \\\\\\\"num_respondidos\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_respondidos}}}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_multiple_column_values(board_id: 18419499542, item_id: \"${$json.monday_item_id}\", column_values: \"{\\\\\\\"numeric_mm4ptj7f\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_enviados}}, \\\\\\\"numeric_mm4psdvz\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_delivered}}, \\\\\\\"numeric_mm4pjtxd\\\\\\\": {\\\\\\\"number\\\\\\\": ${$json.total_respondidos}}}\") { id } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -193,7 +193,7 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: BOARD_ID, item_id: \"${$('Code: Prep mutation').item.json.monday_item_id}\", column_id: \"status_wa\", value: \"{\\\\\\\"label\\\\\\\": \\\\\\\"COMPLETADA\\\\\\\"}\") { id } }` }) }}"
+        "body": "={{ JSON.stringify({ query: `mutation { change_column_value(board_id: 18419499542, item_id: \"${$('Code: Prep mutation').item.json.monday_item_id}\", column_id: \"color_mm4p7mve\", value: \"{\\\\\\\"label\\\\\\\": \\\\\\\"COMPLETADO\\\\\\\"}\") { id } }` }) }}"
       },
       "credentials": {
         "httpHeaderAuth": {

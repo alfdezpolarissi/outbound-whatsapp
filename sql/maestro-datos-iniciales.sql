@@ -703,27 +703,17 @@ FROM maestro.encuestas_maestro e, maestro.lista_metricas m
 WHERE e.codigo_encuesta = 'COMPRA_TELFONO' AND m.codigo_metrica = 'CSAT'
 ON CONFLICT (codigo_pregunta) DO NOTHING;
 INSERT INTO maestro.preguntas_maestro (codigo_pregunta, id_encuesta, id_metrica, orden, texto_pregunta, pregunta_activa)
-SELECT 'COMPRA_TELFONO_P02', e.id_encuesta, m.id_metrica, 2, '¿Considera que ofrecemos suficientes alternativas de precios y marcas para elegir la opción que mejor se ajusta a tus necesidades?Muy insatisfecho, Insatisfecho, Neutral, Satisfecho, Muy satisfecho', TRUE
+SELECT 'COMPRA_TELFONO_P03', e.id_encuesta, m.id_metrica, 2, '¿Cómo de satisfecho está con la disponibilidad de producto que necesitas? Muy insatisfecho, Insatisfecho, Neutral, Satisfecho, Muy satisfecho', TRUE
 FROM maestro.encuestas_maestro e, maestro.lista_metricas m
 WHERE e.codigo_encuesta = 'COMPRA_TELFONO' AND m.codigo_metrica = 'CSAT'
 ON CONFLICT (codigo_pregunta) DO NOTHING;
 INSERT INTO maestro.preguntas_maestro (codigo_pregunta, id_encuesta, id_metrica, orden, texto_pregunta, pregunta_activa)
-SELECT 'COMPRA_TELFONO_P03', e.id_encuesta, m.id_metrica, 3, '¿Cómo de satisfecho está con la disponibilidad de producto que necesitas? Muy insatisfecho, Insatisfecho, Neutral, Satisfecho, Muy satisfecho', TRUE
+SELECT 'COMPRA_TELFONO_P04', e.id_encuesta, m.id_metrica, 3, '¿Le ofrecen alternativas adecuadas cuando no hay stock? Muy insatisfecho, Insatisfecho, Neutral, Satisfecho, Muy satisfecho', TRUE
 FROM maestro.encuestas_maestro e, maestro.lista_metricas m
 WHERE e.codigo_encuesta = 'COMPRA_TELFONO' AND m.codigo_metrica = 'CSAT'
 ON CONFLICT (codigo_pregunta) DO NOTHING;
 INSERT INTO maestro.preguntas_maestro (codigo_pregunta, id_encuesta, id_metrica, orden, texto_pregunta, pregunta_activa)
-SELECT 'COMPRA_TELFONO_P04', e.id_encuesta, m.id_metrica, 4, '¿Le ofrecen alternativas adecuadas cuando no hay stock? Muy insatisfecho, Insatisfecho, Neutral, Satisfecho, Muy satisfecho', TRUE
-FROM maestro.encuestas_maestro e, maestro.lista_metricas m
-WHERE e.codigo_encuesta = 'COMPRA_TELFONO' AND m.codigo_metrica = 'CSAT'
-ON CONFLICT (codigo_pregunta) DO NOTHING;
-INSERT INTO maestro.preguntas_maestro (codigo_pregunta, id_encuesta, id_metrica, orden, texto_pregunta, pregunta_activa)
-SELECT 'COMPRA_TELFONO_P05', e.id_encuesta, m.id_metrica, 5, '¿Cómo valora el precio final que pagas en relación con el valor percibido del producto y del servicio que recibes?Muy insatisfecho, Insatisfecho, Neutral, Satisfecho, Muy satisfecho', TRUE
-FROM maestro.encuestas_maestro e, maestro.lista_metricas m
-WHERE e.codigo_encuesta = 'COMPRA_TELFONO' AND m.codigo_metrica = 'CSAT'
-ON CONFLICT (codigo_pregunta) DO NOTHING;
-INSERT INTO maestro.preguntas_maestro (codigo_pregunta, id_encuesta, id_metrica, orden, texto_pregunta, pregunta_activa)
-SELECT 'COMPRA_TELFONO_P06', e.id_encuesta, m.id_metrica, 6, 'En una escala del 0 al 10, ¿qué probabilidad hay de que recomiendes nuestro servicio a un compañero o amigo?', TRUE
+SELECT 'COMPRA_TELFONO_P06', e.id_encuesta, m.id_metrica, 4, 'En una escala del 0 al 10, ¿qué probabilidad hay de que recomiendes nuestro servicio a un compañero o amigo?', TRUE
 FROM maestro.encuestas_maestro e, maestro.lista_metricas m
 WHERE e.codigo_encuesta = 'COMPRA_TELFONO' AND m.codigo_metrica = 'NPS'
 ON CONFLICT (codigo_pregunta) DO NOTHING;
@@ -1970,26 +1960,6 @@ SELECT 'COMPRA_TELFONO_P01_O05', pr.id_pregunta, 'Muy satisfecho', 5, 'PENDIENTE
 FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P01'
 ON CONFLICT (codigo_opcion) DO NOTHING;
 INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P02_O01', pr.id_pregunta, 'Muy insatisfecho', 1, 'PENDIENTE_1'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P02'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P02_O02', pr.id_pregunta, 'Insatisfecho', 2, 'PENDIENTE_2'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P02'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P02_O03', pr.id_pregunta, 'Neutral', 3, 'PENDIENTE_3'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P02'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P02_O04', pr.id_pregunta, 'Satisfecho', 4, 'PENDIENTE_4'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P02'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P02_O05', pr.id_pregunta, 'Muy satisfecho', 5, 'PENDIENTE_5'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P02'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
 SELECT 'COMPRA_TELFONO_P03_O01', pr.id_pregunta, 'Muy insatisfecho', 1, 'PENDIENTE_1'
 FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P03'
 ON CONFLICT (codigo_opcion) DO NOTHING;
@@ -2028,26 +1998,6 @@ ON CONFLICT (codigo_opcion) DO NOTHING;
 INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
 SELECT 'COMPRA_TELFONO_P04_O05', pr.id_pregunta, 'Muy satisfecho', 5, 'PENDIENTE_5'
 FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P04'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P05_O01', pr.id_pregunta, 'Muy insatisfecho', 1, 'PENDIENTE_1'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P05'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P05_O02', pr.id_pregunta, 'Insatisfecho', 2, 'PENDIENTE_2'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P05'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P05_O03', pr.id_pregunta, 'Neutral', 3, 'PENDIENTE_3'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P05'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P05_O04', pr.id_pregunta, 'Satisfecho', 4, 'PENDIENTE_4'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P05'
-ON CONFLICT (codigo_opcion) DO NOTHING;
-INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
-SELECT 'COMPRA_TELFONO_P05_O05', pr.id_pregunta, 'Muy satisfecho', 5, 'PENDIENTE_5'
-FROM maestro.preguntas_maestro pr WHERE pr.codigo_pregunta = 'COMPRA_TELFONO_P05'
 ON CONFLICT (codigo_opcion) DO NOTHING;
 INSERT INTO maestro.opciones_maestro (codigo_opcion, id_pregunta, texto_opcion, valor_numerico, id_externo_opcion)
 SELECT 'COMPRA_TELFONO_P06_O00', pr.id_pregunta, '0', 0, 'PENDIENTE_0'
@@ -3847,37 +3797,23 @@ INSERT INTO maestro.encuestas_versiones (id_encuesta, version_num, version_encue
 SELECT e.id_encuesta, 1, 'v1.0', TRUE FROM maestro.encuestas_maestro e WHERE e.codigo_encuesta = 'COMPRA_TELFONO'
 ON CONFLICT (id_encuesta, version_num) DO NOTHING;
 INSERT INTO maestro.ponderaciones_versiones (id_encuesta, version_num, id_pregunta, id_metrica, peso_global_marketing, peso_final_calculado)
-SELECT e.id_encuesta, 1, pr.id_pregunta, m.id_metrica, 0.0600, 0.012000
+SELECT e.id_encuesta, 1, pr.id_pregunta, m.id_metrica, 0.0600, 0.020000
 FROM maestro.encuestas_maestro e
 JOIN maestro.preguntas_maestro pr ON pr.codigo_pregunta = 'COMPRA_TELFONO_P01'
 JOIN maestro.lista_metricas m ON m.codigo_metrica = 'CSAT'
 WHERE e.codigo_encuesta = 'COMPRA_TELFONO'
 ON CONFLICT (id_encuesta, version_num, id_pregunta) DO UPDATE SET peso_final_calculado = EXCLUDED.peso_final_calculado;
 INSERT INTO maestro.ponderaciones_versiones (id_encuesta, version_num, id_pregunta, id_metrica, peso_global_marketing, peso_final_calculado)
-SELECT e.id_encuesta, 1, pr.id_pregunta, m.id_metrica, 0.0600, 0.012000
-FROM maestro.encuestas_maestro e
-JOIN maestro.preguntas_maestro pr ON pr.codigo_pregunta = 'COMPRA_TELFONO_P02'
-JOIN maestro.lista_metricas m ON m.codigo_metrica = 'CSAT'
-WHERE e.codigo_encuesta = 'COMPRA_TELFONO'
-ON CONFLICT (id_encuesta, version_num, id_pregunta) DO UPDATE SET peso_final_calculado = EXCLUDED.peso_final_calculado;
-INSERT INTO maestro.ponderaciones_versiones (id_encuesta, version_num, id_pregunta, id_metrica, peso_global_marketing, peso_final_calculado)
-SELECT e.id_encuesta, 1, pr.id_pregunta, m.id_metrica, 0.0600, 0.012000
+SELECT e.id_encuesta, 1, pr.id_pregunta, m.id_metrica, 0.0600, 0.020000
 FROM maestro.encuestas_maestro e
 JOIN maestro.preguntas_maestro pr ON pr.codigo_pregunta = 'COMPRA_TELFONO_P03'
 JOIN maestro.lista_metricas m ON m.codigo_metrica = 'CSAT'
 WHERE e.codigo_encuesta = 'COMPRA_TELFONO'
 ON CONFLICT (id_encuesta, version_num, id_pregunta) DO UPDATE SET peso_final_calculado = EXCLUDED.peso_final_calculado;
 INSERT INTO maestro.ponderaciones_versiones (id_encuesta, version_num, id_pregunta, id_metrica, peso_global_marketing, peso_final_calculado)
-SELECT e.id_encuesta, 1, pr.id_pregunta, m.id_metrica, 0.0600, 0.012000
+SELECT e.id_encuesta, 1, pr.id_pregunta, m.id_metrica, 0.0600, 0.020000
 FROM maestro.encuestas_maestro e
 JOIN maestro.preguntas_maestro pr ON pr.codigo_pregunta = 'COMPRA_TELFONO_P04'
-JOIN maestro.lista_metricas m ON m.codigo_metrica = 'CSAT'
-WHERE e.codigo_encuesta = 'COMPRA_TELFONO'
-ON CONFLICT (id_encuesta, version_num, id_pregunta) DO UPDATE SET peso_final_calculado = EXCLUDED.peso_final_calculado;
-INSERT INTO maestro.ponderaciones_versiones (id_encuesta, version_num, id_pregunta, id_metrica, peso_global_marketing, peso_final_calculado)
-SELECT e.id_encuesta, 1, pr.id_pregunta, m.id_metrica, 0.0600, 0.012000
-FROM maestro.encuestas_maestro e
-JOIN maestro.preguntas_maestro pr ON pr.codigo_pregunta = 'COMPRA_TELFONO_P05'
 JOIN maestro.lista_metricas m ON m.codigo_metrica = 'CSAT'
 WHERE e.codigo_encuesta = 'COMPRA_TELFONO'
 ON CONFLICT (id_encuesta, version_num, id_pregunta) DO UPDATE SET peso_final_calculado = EXCLUDED.peso_final_calculado;
