@@ -535,7 +535,7 @@
         "operation": "executeQuery",
         "query": "=UPDATE contactos.contactos SET listas_mailjet = $1 WHERE id_mailjet = {{ $json.id_mailjet }}",
         "additionalFields": {
-          "queryParams": "={{ $json.listas_mailjet }}"
+          "queryParams": "={{ [$json.listas_mailjet] }}"
         }
       },
       "id": "a2a76633-97fc-4f2b-8b57-6c13bf966ce9",
